@@ -56,7 +56,20 @@ func _run_checks() -> void:
 	assert(aligned_swung, "Should detect forward pitch cut when holding blade horizontal")
 	assert(absf(mf.last_slash_dir.x) > 0.85, "Horizontal blade pitch swing must execute horizontally, got %s" % str(mf.last_slash_dir))
 	mf.recenter()
-	print("OK MotionFusion tilted recenter / blade-aligned slash / swing")
+
+	# Forward arm thrust check even when browser linear_accel (raw_accel - raw_gravity) is missing
+	for i in 14:
+		mf.update(0.016, Vector3.ZERO, Vector3(0.0, -9.81, 0.0), Vector3(0.0, -9.81, 0.0))
+	var lunge_swung := false
+	for i in 6:
+		var punch_accel := Vector3(0.0, -9.81, 6.8)
+		mf.update(0.016, Vector3(-0.9, 0.0, 0.0), punch_accel, punch_accel)
+		if mf.just_swung:
+			lunge_swung = true
+	assert(lunge_swung, "Forward thrust must trigger attack even if device linear_accel fallback relies on accel magnitude/jerk")
+	assert(mf.last_swing_source == "Empuje frontal", "Expected forward thrust source, got %s" % mf.last_swing_source)
+	mf.recenter()
+	print("OK MotionFusion tilted recenter / blade-aligned slash / forward lunge")
 
 	# 3. MainMenu scene load & step
 	var menu_scene: PackedScene = load("res://scenes/MainMenu.tscn")
@@ -67,14 +80,20 @@ func _run_checks() -> void:
 	await tree.process_frame
 	print("OK MainMenu instantiated")
 
-	# 4. CalibrationRoom scene load & step
+	# 4. CalibrationRoom animated coach & live diag step check
 	var cal_scene: PackedScene = load("res://scenes/CalibrationRoom.tscn")
 	var cal := cal_scene.instantiate()
 	tree.root.add_child(cal)
 	await tree.process_frame
+	cal._on_step_3_pressed()
+	for i in 55:
+		cal._process(0.02)
+	cal._on_step_4_pressed()
+	for i in 20:
+		cal._process(0.02)
 	cal.queue_free()
 	await tree.process_frame
-	print("OK CalibrationRoom instantiated")
+	print("OK CalibrationRoom animated coach instantiated and stepped")
 
 	# 5. ChambaraArena 1P entry calibration, active parry, auto-guard, and guard break checks
 	GameConfig.match_mode = "1p"

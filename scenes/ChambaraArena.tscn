@@ -138,6 +138,10 @@ text = "Centrar J1 (R)"
 layout_mode = 2
 text = "Centrar J2"
 
+[node name="GuideBtn" type="Button" parent="UI/HUD/BottomCard/BottomInfo"]
+layout_mode = 2
+text = "❔ Guía 3D"
+
 [node name="MenuBtn" type="Button" parent="UI/HUD/BottomCard/BottomInfo"]
 layout_mode = 2
 text = "Menú"
@@ -220,6 +224,7 @@ text = "Volver al Menú"
 
 [connection signal="pressed" from="UI/HUD/BottomCard/BottomInfo/RecenterP1" to="." method="_on_recenter_p1_pressed"]
 [connection signal="pressed" from="UI/HUD/BottomCard/BottomInfo/RecenterP2" to="." method="_on_recenter_p2_pressed"]
+[connection signal="pressed" from="UI/HUD/BottomCard/BottomInfo/GuideBtn" to="." method="_on_guide_pressed"]
 [connection signal="pressed" from="UI/HUD/BottomCard/BottomInfo/MenuBtn" to="." method="_on_menu_pressed"]
 [connection signal="pressed" from="UI/CalibPanel/VBox/CalibConfirmBtn" to="." method="_on_calib_confirm_pressed"]
 [connection signal="pressed" from="UI/VictoryPanel/VBox/RematchBtn" to="." method="_on_rematch_pressed"]

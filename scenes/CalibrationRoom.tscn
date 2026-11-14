@@ -1,10 +1,10 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/scenes/CalibrationRoom.gd" id="1"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat"]
-sky_top_color = Color(0.24, 0.57, 0.92, 1)
-sky_horizon_color = Color(0.75, 0.89, 0.98, 1)
+sky_top_color = Color(0.14, 0.52, 0.92, 1)
+sky_horizon_color = Color(0.76, 0.92, 1.0, 1)
 
 [sub_resource type="Sky" id="SkyRes"]
 sky_material = SubResource("SkyMat")
@@ -13,9 +13,7 @@ sky_material = SubResource("SkyMat")
 background_mode = 2
 sky = SubResource("SkyRes")
 ambient_light_source = 3
-
-[sub_resource type="PlaneMesh" id="FloorMesh"]
-size = Vector2(18, 12)
+ambient_light_energy = 0.85
 
 [node name="CalibrationRoom" type="Node3D"]
 script = ExtResource("1")
@@ -24,30 +22,14 @@ script = ExtResource("1")
 environment = SubResource("EnvRes")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
-transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 5, 4)
+transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 8, 5)
 shadow_enabled = true
 
 [node name="Camera3D" type="Camera3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 0.965926, 0.258819, 0, -0.258819, 0.965926, 0, 1.55, 3.85)
-fov = 52.0
+transform = Transform3D(1, 0, 0, 0, 0.961262, 0.275637, 0, -0.275637, 0.961262, 0, 2.05, 4.75)
+fov = 50.0
 
-[node name="Floor" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.4, 0)
-mesh = SubResource("FloorMesh")
-
-[node name="RigP1" type="Node3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.25, 0.35, 0)
-
-[node name="SwordPivot" type="Node3D" parent="RigP1"]
-
-[node name="GuardHalo" type="MeshInstance3D" parent="RigP1/SwordPivot"]
-
-[node name="RigP2" type="Node3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.25, 0.35, 0)
-
-[node name="SwordPivot" type="Node3D" parent="RigP2"]
-
-[node name="GuardHalo" type="MeshInstance3D" parent="RigP2/SwordPivot"]
+[node name="StageRoot" type="Node3D" parent="."]
 
 [node name="UI" type="CanvasLayer" parent="."]
 
@@ -55,79 +37,166 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.25, 0.35, 0)
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 20.0
-offset_top = 16.0
-offset_right = -20.0
-offset_bottom = -16.0
+offset_left = 18.0
+offset_top = 14.0
+offset_right = -18.0
+offset_bottom = -14.0
 grow_horizontal = 2
 grow_vertical = 2
+theme_override_constants/separation = 8
 mouse_filter = 2
 
-[node name="TopCards" type="HBoxContainer" parent="UI/HUD"]
+[node name="CoachCard" type="PanelContainer" parent="UI/HUD"]
 layout_mode = 2
-theme_override_constants/separation = 16
-mouse_filter = 2
 
-[node name="CardP1" type="PanelContainer" parent="UI/HUD/TopCards"]
+[node name="VBox" type="VBoxContainer" parent="UI/HUD/CoachCard"]
 layout_mode = 2
-size_flags_horizontal = 3
+theme_override_constants/separation = 8
 
-[node name="LabelP1" type="Label" parent="UI/HUD/TopCards/CardP1"]
+[node name="StepButtons" type="HBoxContainer" parent="UI/HUD/CoachCard/VBox"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 15
-text = "J1..."
+theme_override_constants/separation = 8
 
-[node name="CardP2" type="PanelContainer" parent="UI/HUD/TopCards"]
+[node name="BtnAuto" type="Button" parent="UI/HUD/CoachCard/VBox/StepButtons"]
 layout_mode = 2
 size_flags_horizontal = 3
+text = "🔁 Ver Todo (Auto)"
 
-[node name="LabelP2" type="Label" parent="UI/HUD/TopCards/CardP2"]
+[node name="BtnStep1" type="Button" parent="UI/HUD/CoachCard/VBox/StepButtons"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 15
-text = "J2..."
+size_flags_horizontal = 3
+text = "1. Postura (45°)"
 
-[node name="Spacer" type="Control" parent="UI/HUD"]
+[node name="BtnStep2" type="Button" parent="UI/HUD/CoachCard/VBox/StepButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "2. Girar Hoja"
+
+[node name="BtnStep3" type="Button" parent="UI/HUD/CoachCard/VBox/StepButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "3. Atacar (Corte)"
+
+[node name="BtnStep4" type="Button" parent="UI/HUD/CoachCard/VBox/StepButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "4. Bloquear / Parry"
+
+[node name="InstructionLabel" type="Label" parent="UI/HUD/CoachCard/VBox"]
+layout_mode = 2
+horizontal_alignment = 1
+autowrap_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Cargando guía animada..."
+
+[node name="CenterRow" type="HBoxContainer" parent="UI/HUD"]
 layout_mode = 2
 size_flags_vertical = 3
 mouse_filter = 2
 
-[node name="BottomBar" type="HBoxContainer" parent="UI/HUD"]
+[node name="LeftLabel" type="Label" parent="UI/HUD/CenterRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 8
+theme_override_colors/font_color = Color(0.75, 0.96, 1, 1)
+theme_override_colors/font_outline_color = Color(0.03, 0.08, 0.16, 0.95)
+theme_override_constants/outline_size = 5
+theme_override_font_sizes/font_size = 18
+text = "⬅️ EJEMPLO ANIMADO (Cómo hacerlo)"
+
+[node name="RightLabel" type="Label" parent="UI/HUD/CenterRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 8
+horizontal_alignment = 2
+theme_override_colors/font_color = Color(0.55, 1, 0.78, 1)
+theme_override_colors/font_outline_color = Color(0.03, 0.08, 0.16, 0.95)
+theme_override_constants/outline_size = 5
+theme_override_font_sizes/font_size = 18
+text = "TU MANDO EN VIVO ➡️"
+
+[node name="DiagCard" type="PanelContainer" parent="UI/HUD"]
+layout_mode = 2
+
+[node name="DiagVBox" type="VBoxContainer" parent="UI/HUD/DiagCard"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="EnergyRow" type="HBoxContainer" parent="UI/HUD/DiagCard/DiagVBox"]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="EventLog" type="Label" parent="UI/HUD/BottomBar"]
+[node name="EnergyCaption" type="Label" parent="UI/HUD/DiagCard/DiagVBox/EnergyRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Fuerza del gesto (umbral 100%):"
+
+[node name="EnergyBar" type="ProgressBar" parent="UI/HUD/DiagCard/DiagVBox/EnergyRow"]
 layout_mode = 2
 size_flags_horizontal = 3
+custom_minimum_size = Vector2(220, 20)
+max_value = 140.0
+show_percentage = false
+
+[node name="SwingBadge" type="Label" parent="UI/HUD/DiagCard/DiagVBox/EnergyRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(270, 0)
+horizontal_alignment = 2
 theme_override_font_sizes/font_size = 15
-text = "Mueve o gira el mando / móvil. Con ratón: mueve para girar, R para centrar, Clic derecho para bloquear, Clic izquierdo para cortar."
+text = "Mueve o gira para probar el ataque"
+
+[node name="StatsRow" type="HBoxContainer" parent="UI/HUD/DiagCard/DiagVBox"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="LabelP1" type="Label" parent="UI/HUD/DiagCard/DiagVBox/StatsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 13
+text = "J1..."
+
+[node name="LabelP2" type="Label" parent="UI/HUD/DiagCard/DiagVBox/StatsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+horizontal_alignment = 2
+theme_override_font_sizes/font_size = 13
+text = "J2..."
+
+[node name="BottomBar" type="HBoxContainer" parent="UI/HUD"]
+layout_mode = 2
+theme_override_constants/separation = 8
 
 [node name="RecenterP1" type="Button" parent="UI/HUD/BottomBar"]
 layout_mode = 2
-text = "Centrar J1 (R)"
+text = "🎯 Centrar J1 (R)"
 
 [node name="BiasP1" type="Button" parent="UI/HUD/BottomBar"]
 layout_mode = 2
-text = "Calibrar Reposo J1"
+text = "Calibrar Reposo"
 
 [node name="RumbleP1" type="Button" parent="UI/HUD/BottomBar"]
 layout_mode = 2
-text = "Vibrar J1"
+text = "Vibrar"
 
-[node name="RecenterP2" type="Button" parent="UI/HUD/BottomBar"]
+[node name="Spacer" type="Control" parent="UI/HUD/BottomBar"]
 layout_mode = 2
-text = "Centrar J2"
+size_flags_horizontal = 3
 
-[node name="RumbleP2" type="Button" parent="UI/HUD/BottomBar"]
+[node name="Play1PBtn" type="Button" parent="UI/HUD/BottomBar"]
 layout_mode = 2
-text = "Vibrar J2"
+text = "⚔️ ¡Probar en Combate 1P!"
 
 [node name="BackBtn" type="Button" parent="UI/HUD/BottomBar"]
 layout_mode = 2
-text = "Volver"
+text = "Volver al Menú"
 
+[connection signal="pressed" from="UI/HUD/CoachCard/VBox/StepButtons/BtnAuto" to="." method="_on_step_auto_pressed"]
+[connection signal="pressed" from="UI/HUD/CoachCard/VBox/StepButtons/BtnStep1" to="." method="_on_step_1_pressed"]
+[connection signal="pressed" from="UI/HUD/CoachCard/VBox/StepButtons/BtnStep2" to="." method="_on_step_2_pressed"]
+[connection signal="pressed" from="UI/HUD/CoachCard/VBox/StepButtons/BtnStep3" to="." method="_on_step_3_pressed"]
+[connection signal="pressed" from="UI/HUD/CoachCard/VBox/StepButtons/BtnStep4" to="." method="_on_step_4_pressed"]
 [connection signal="pressed" from="UI/HUD/BottomBar/RecenterP1" to="." method="_on_recenter_p1_pressed"]
 [connection signal="pressed" from="UI/HUD/BottomBar/BiasP1" to="." method="_on_bias_p1_pressed"]
 [connection signal="pressed" from="UI/HUD/BottomBar/RumbleP1" to="." method="_on_rumble_p1_pressed"]
-[connection signal="pressed" from="UI/HUD/BottomBar/RecenterP2" to="." method="_on_recenter_p2_pressed"]
-[connection signal="pressed" from="UI/HUD/BottomBar/RumbleP2" to="." method="_on_rumble_p2_pressed"]
+[connection signal="pressed" from="UI/HUD/BottomBar/Play1PBtn" to="." method="_on_play_1p_pressed"]
 [connection signal="pressed" from="UI/HUD/BottomBar/BackBtn" to="." method="_on_back_pressed"]

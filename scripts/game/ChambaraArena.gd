@@ -334,8 +334,8 @@ func _start_round() -> void:
 	if GameConfig.match_mode == "1p":
 		f2.is_guarding = true
 	phase = MatchPhase.INTRO
-	phase_timer = 1.15
-	_show_banner("RONDA %d — ¡LISTOS!" % round_number, 1.15)
+	phase_timer = 1.45
+	_show_banner("RONDA %d — ¡LISTOS!\nApunta 45° hacia el monitor • Corte rápido = Atacar • Mantén pulsado = Bloquear" % round_number, 1.45)
 	_update_hud()
 
 
@@ -898,6 +898,10 @@ func _on_recenter_p1_pressed() -> void:
 func _on_recenter_p2_pressed() -> void:
 	MotionHub.recenter_slot(1)
 	_play_sfx("bell", 1.3, -8.0)
+
+
+func _on_guide_pressed() -> void:
+	get_tree().change_scene_to_file("res://scenes/CalibrationRoom.tscn")
 
 
 func _on_menu_pressed() -> void:

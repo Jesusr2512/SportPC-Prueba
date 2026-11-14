@@ -234,6 +234,12 @@ func _update_gamepad_slot(s: PlayerSlot, delta: float) -> void:
 		s.fusion.update(delta, mapped_gyro, mapped_accel, mapped_gravity)
 
 	s.begin_frame(guard, strike, recenter)
+	if s.just_strike_pressed:
+		s.fusion.just_swung = true
+		s.fusion.last_slash_power = 1.0
+		s.fusion.last_swing_source = "Botón Mando"
+		var cut_ang := s.fusion.quantize_4_angles(s.fusion.get_snapped_blade_roll_rad()) - PI * 0.5
+		s.fusion.last_slash_dir = Vector2(cos(cut_ang), sin(cut_ang)).normalized()
 
 
 func _update_mobile_slot(s: PlayerSlot, delta: float) -> void:
@@ -279,8 +285,9 @@ func _update_mobile_slot(s: PlayerSlot, delta: float) -> void:
 	if s.just_strike_pressed:
 		s.fusion.just_swung = true
 		s.fusion.last_slash_power = 1.0
-		var roll := s.fusion.get_blade_roll_rad()
-		s.fusion.last_slash_dir = Vector2(cos(roll), sin(roll)).normalized()
+		s.fusion.last_swing_source = "Botón"
+		var cut_ang := s.fusion.quantize_4_angles(s.fusion.get_snapped_blade_roll_rad()) - PI * 0.5
+		s.fusion.last_slash_dir = Vector2(cos(cut_ang), sin(cut_ang)).normalized()
 
 
 func _update_mouse_slot(s: PlayerSlot, delta: float) -> void:
@@ -329,10 +336,9 @@ func _update_mouse_slot(s: PlayerSlot, delta: float) -> void:
 	if s.just_strike_pressed:
 		s.fusion.just_swung = true
 		s.fusion.last_slash_power = 0.95
-		var dir := Vector2(-_mouse_accum.x, -_mouse_accum.y)
-		if dir.length() < 2.0:
-			dir = Vector2(cos(s.fusion.get_blade_roll_rad()), sin(s.fusion.get_blade_roll_rad()))
-		s.fusion.last_slash_dir = dir.normalized()
+		s.fusion.last_swing_source = "Clic Ratón"
+		var cut_ang := s.fusion.quantize_4_angles(s.fusion.get_snapped_blade_roll_rad()) - PI * 0.5
+		s.fusion.last_slash_dir = Vector2(cos(cut_ang), sin(cut_ang)).normalized()
 
 
 func trigger_rumble(slot_idx: int, strength: float = 0.65, duration: float = 0.12) -> void:

@@ -2,8 +2,8 @@ class_name MotionFusion
 extends RefCounted
 
 const GYRO_DEADZONE := 0.04
-const SWING_THRESHOLD := 2.75
-const SWING_COOLDOWN := 0.14
+const SWING_THRESHOLD := 2.85
+const SWING_COOLDOWN := 0.15
 const STEADY_THRESHOLD := 2.0
 const BIAS_ALPHA := 0.06
 const GRAVITY_BLEND := 0.07
@@ -26,19 +26,25 @@ var blade_roll_rad: float = 0.0
 var snapped_blade_roll_rad: float = 0.0
 
 var angular_speed: float = 0.0
+var dynamic_accel_mag: float = 0.0
+var motion_energy: float = 0.0
 var is_steady: bool = true
 var has_centered_once: bool = false
 var swing_cooldown_timer: float = 0.0
 var last_slash_dir: Vector2 = Vector2.RIGHT
 var last_slash_power: float = 0.0
+var last_swing_source: String = ""
 var just_swung: bool = false
 
 var _ref_gravity: Vector3 = Vector3(0.0, -1.0, 0.0)
+var _prev_accel: Vector3 = Vector3(0.0, -9.81, 0.0)
+var _lp_accel: Vector3 = Vector3.ZERO
 var _bias_samples_left: int = 0
 var _bias_accum: Vector3 = Vector3.ZERO
 var _bias_count: int = 0
 var _swing_armed: bool = true
 var _peak_gyro: Vector3 = Vector3.ZERO
+var _peak_dyn_accel: float = 0.0
 var _peak_timer: float = 0.0
 
 
@@ -52,6 +58,10 @@ func reset_pose() -> void:
 	blade_roll_rad = 0.0
 	snapped_blade_roll_rad = 0.0
 	_ref_gravity = Vector3(0.0, -1.0, 0.0)
+	_prev_accel = Vector3(0.0, -9.81, 0.0)
+	_lp_accel = Vector3.ZERO
+	dynamic_accel_mag = 0.0
+	motion_energy = 0.0
 
 
 func recenter() -> void:
@@ -59,6 +69,11 @@ func recenter() -> void:
 		_ref_gravity = gravity.normalized()
 	else:
 		_ref_gravity = Vector3(0.0, -1.0, 0.0)
+	if accel.length() > 0.5:
+		_prev_accel = accel
+		_lp_accel = accel
+	else:
+		_lp_accel = Vector3.ZERO
 	recenter_offset = raw_orientation.inverse()
 	pitch_rad = 0.0
 	yaw_rad = 0.0
@@ -90,6 +105,19 @@ func update(delta: float, raw_gyro: Vector3, raw_accel: Vector3, raw_gravity: Ve
 	if raw_gravity.length() > 0.5:
 		gravity = gravity.lerp(raw_gravity, 0.35) if gravity.length() > 0.5 else raw_gravity
 	linear_accel = raw_accel - raw_gravity
+
+	var dyn_accel := linear_accel.length()
+	if raw_accel.length() > 0.5:
+		if _lp_accel.length() < 0.5:
+			_lp_accel = raw_accel
+		var gy_mag := (raw_gyro - gyro_bias).length()
+		var hp_accel := (raw_accel - _lp_accel).length()
+		var mag_dev := absf(raw_accel.length() - 9.81)
+		dyn_accel = maxf(dyn_accel, maxf(hp_accel, mag_dev * 1.35))
+		var lp_alpha := 0.35 if (gy_mag < 0.35 and (raw_accel - _prev_accel).length() < 0.7) else 0.14
+		_lp_accel = _lp_accel.lerp(raw_accel, lp_alpha)
+	_prev_accel = raw_accel
+	dynamic_accel_mag = dyn_accel
 
 	if _bias_samples_left > 0:
 		_bias_accum += raw_gyro
@@ -164,6 +192,7 @@ func apply_external_orientation(target_q: Quaternion, delta: float, raw_gyro: Ve
 	gyro = raw_gyro
 	linear_accel = raw_linear
 	angular_speed = raw_gyro.length()
+	dynamic_accel_mag = raw_linear.length()
 	is_steady = angular_speed < STEADY_THRESHOLD
 	_detect_swing(delta)
 
@@ -197,10 +226,10 @@ func _compute_snapped_roll(raw_roll: float) -> float:
 
 
 func _detect_swing(delta: float) -> void:
-	var motion_energy := angular_speed + linear_accel.length() * 0.28
+	motion_energy = angular_speed + dynamic_accel_mag * 0.44
 
 	if not _swing_armed:
-		if motion_energy < SWING_THRESHOLD * 0.48 and swing_cooldown_timer <= 0.0:
+		if motion_energy < SWING_THRESHOLD * 0.52 and swing_cooldown_timer <= 0.0:
 			_swing_armed = true
 		return
 
@@ -208,6 +237,8 @@ func _detect_swing(delta: float) -> void:
 		_peak_timer -= delta
 		if angular_speed > _peak_gyro.length():
 			_peak_gyro = gyro
+		if dynamic_accel_mag > _peak_dyn_accel:
+			_peak_dyn_accel = dynamic_accel_mag
 		if _peak_timer <= 0.0:
 			just_swung = true
 			_swing_armed = false
@@ -217,15 +248,17 @@ func _detect_swing(delta: float) -> void:
 			# Only pure horizontal swipes from a vertical stance override to horizontal cut.
 			var horiz := -_peak_gyro.y
 			var vert := _peak_gyro.x
-			if absf(snapped_blade_roll_rad) < 0.26 and absf(horiz) > absf(vert) * 1.25 and absf(horiz) > 1.0:
+			if absf(snapped_blade_roll_rad) < 0.26 and absf(horiz) > absf(vert) * 1.25 and absf(horiz) > 1.3:
 				last_slash_dir = Vector2(signf(horiz), 0.0)
 			else:
 				var cut_ang := quantize_4_angles(snapped_blade_roll_rad) - PI * 0.5
 				last_slash_dir = Vector2(cos(cut_ang), sin(cut_ang)).normalized()
 
-			last_slash_power = clampf(_peak_gyro.length() / 9.8, 0.45, 1.45)
+			last_slash_power = clampf(maxf(_peak_gyro.length() / 9.2, _peak_dyn_accel / 12.5), 0.55, 1.45)
+			last_swing_source = "Latigazo de muñeca" if _peak_gyro.length() >= 2.0 else "Empuje frontal"
 	elif swing_cooldown_timer <= 0.0 and motion_energy >= SWING_THRESHOLD:
 		_peak_gyro = gyro
+		_peak_dyn_accel = dynamic_accel_mag
 		_peak_timer = 0.028
 
 

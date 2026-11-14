@@ -135,7 +135,7 @@ theme_override_constants/separation = 12
 layout_mode = 2
 custom_minimum_size = Vector2(0, 56)
 theme_override_font_sizes/font_size = 20
-text = "1. Sala de Calibración 6-Axis (Prueba 3D en vivo)"
+text = "1. Cómo Jugar — Animación 3D de Postura y Gestos (Probar Ataque)"
 
 [node name="RowAI" type="HBoxContainer" parent="UI/Margin/Root/ActionsCard"]
 layout_mode = 2
