@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <link rel="icon" href="data:," />
+  <title>SportPC Mando 6-Axis</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
+      background: radial-gradient(circle at 50% 25%, #0f294d 0%, #071226 68%, #040914 100%);
+      color: #f8fafc;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      touch-action: none;
+    }
+    .app {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      padding: 12px;
+      gap: 10px;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      padding: 10px 14px;
+      gap: 8px;
+    }
+    .title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .title { font-weight: 800; font-size: 16px; letter-spacing: 0.3px; }
+    .badge {
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      background: #ef4444;
+      color: #fff;
+    }
+    .badge.ok { background: #10b981; color: #042f2e; }
+    .top-recenter {
+      border: 1px solid rgba(56, 189, 248, 0.55);
+      background: rgba(14, 165, 233, 0.22);
+      color: #e0f2fe;
+      font-weight: 800;
+      font-size: 13px;
+      border-radius: 12px;
+      padding: 8px 12px;
+    }
+    .top-recenter:active {
+      background: #38bdf8;
+      color: #082f49;
+    }
+    .setup-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 8px;
+    }
+    .setup-panel.hidden {
+      display: none;
+    }
+    .slots {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .slot-btn {
+      padding: 14px;
+      border-radius: 16px;
+      border: 2px solid rgba(255,255,255,0.16);
+      background: rgba(255,255,255,0.05);
+      color: #cbd5e1;
+      font-weight: 800;
+      font-size: 15px;
+    }
+    .slot-btn.active-p1 {
+      background: rgba(6, 182, 212, 0.22);
+      border-color: #22d3ee;
+      color: #cffafe;
+    }
+    .slot-btn.active-p2 {
+      background: rgba(251, 113, 133, 0.22);
+      border-color: #fb7185;
+      color: #ffe4e6;
+    }
+    .connect-btn {
+      width: 100%;
+      padding: 20px 16px;
+      border: none;
+      border-radius: 20px;
+      background: linear-gradient(135deg, #22c55e, #0ea5e9);
+      color: #031525;
+      font-size: 18px;
+      font-weight: 900;
+      box-shadow: 0 10px 26px rgba(14, 165, 233, 0.35);
+    }
+    .tip-box {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 14px;
+      padding: 12px 14px;
+      font-size: 13px;
+      line-height: 1.45;
+      color: #cbd5e1;
+    }
+    .play-panel {
+      flex: 1;
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .play-panel.visible {
+      display: flex;
+    }
+    .guard-pad {
+      flex: 1;
+      border-radius: 28px;
+      border: 3px solid rgba(56, 189, 248, 0.55);
+      background: radial-gradient(circle at 50% 45%, rgba(14, 116, 144, 0.42), rgba(12, 34, 68, 0.85));
+      color: #ffffff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      padding: 18px;
+      position: relative;
+      transition: transform 0.08s ease, background 0.1s ease, border-color 0.1s ease;
+      box-shadow: inset 0 0 36px rgba(14, 165, 233, 0.16);
+    }
+    .guard-pad.pressed {
+      background: radial-gradient(circle at 50% 45%, rgba(56, 189, 248, 0.72), rgba(2, 132, 199, 0.92));
+      border-color: #ffffff;
+      transform: scale(0.985);
+      box-shadow: 0 0 34px rgba(56, 189, 248, 0.45);
+    }
+    .dial-wrap {
+      width: 196px;
+      height: 196px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    .pad-title {
+      font-size: 26px;
+      font-weight: 900;
+      letter-spacing: 0.6px;
+      text-align: center;
+      pointer-events: none;
+    }
+    .pad-sub {
+      font-size: 14px;
+      font-weight: 600;
+      color: #bae6fd;
+      text-align: center;
+      max-width: 280px;
+      line-height: 1.35;
+      pointer-events: none;
+    }
+    .pose-chip {
+      padding: 6px 14px;
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255,255,255,0.18);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.4px;
+      color: #7dd3fc;
+      pointer-events: none;
+    }
+    .telemetry {
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      color: #94a3b8;
+      background: rgba(0,0,0,0.34);
+      border-radius: 10px;
+      padding: 7px 10px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="header">
+      <div class="title-wrap">
+        <div class="title">SportPC</div>
+        <div id="statusBadge" class="badge">Desconectado</div>
+      </div>
+      <button id="recenterBtn" class="top-recenter" type="button">🎯 CENTRAR</button>
+    </div>
+
+    <div id="setupPanel" class="setup-panel">
+      <div class="slots">
+        <button id="btnP1" class="slot-btn active-p1" type="button">Jugador 1 (Azul)</button>
+        <button id="btnP2" class="slot-btn" type="button">Jugador 2 (Coral)</button>
+      </div>
+
+      <button id="connectBtn" class="connect-btn" type="button">Conectar y Bloquear Giro</button>
+
+      <div class="tip-box">
+        <b>Controles simplificados (sin mirar el móvil):</b><br />
+        • <b>Agita el móvil</b> en cualquier dirección para cortar.<br />
+        • <b>Gira la muñeca</b> para cambiar el ángulo de la hoja (vertical, diagonal u horizontal).<br />
+        • <b>Toca cualquier parte de la pantalla</b> para cubrirte (o mantén la hoja quieta perpendicular al golpe para <b>autobloqueo sin botones</b>).
+      </div>
+    </div>
+
+    <div id="playPanel" class="play-panel">
+      <div id="guardPad" class="guard-pad" role="button" aria-label="Bloquear">
+        <div class="dial-wrap">
+          <svg viewBox="0 0 200 200" width="196" height="196">
+            <circle cx="100" cy="100" r="88" fill="rgba(4,12,28,0.45)" stroke="rgba(125,211,252,0.35)" stroke-width="4" />
+            <line x1="100" y1="20" x2="100" y2="34" stroke="rgba(255,255,255,0.25)" stroke-width="3" stroke-linecap="round" />
+            <line x1="180" y1="100" x2="166" y2="100" stroke="rgba(255,255,255,0.25)" stroke-width="3" stroke-linecap="round" />
+            <line x1="20" y1="100" x2="34" y2="100" stroke="rgba(255,255,255,0.25)" stroke-width="3" stroke-linecap="round" />
+            <g id="dialBlade" transform="rotate(0 100 100)">
+              <line x1="100" y1="164" x2="100" y2="26" stroke="#38bdf8" stroke-width="11" stroke-linecap="round" />
+              <line x1="100" y1="145" x2="100" y2="29" stroke="#ffffff" stroke-width="4" stroke-linecap="round" />
+              <line x1="80" y1="138" x2="120" y2="138" stroke="#f8fafc" stroke-width="6" stroke-linecap="round" />
+            </g>
+          </svg>
+        </div>
+        <div id="poseChip" class="pose-chip">POSTURA: VERTICAL |</div>
+        <div id="padTitle" class="pad-title">TOCA PARA BLOQUEAR</div>
+        <div class="pad-sub">Mantén el pulgar en cualquier sitio para Guardia Activa, o suelta y sostén el ángulo para Autobloqueo</div>
+      </div>
+    </div>
+
+    <div id="telemetry" class="telemetry">Listo para conectar.</div>
+  </div>
+
+  <script>
+    const statusBadge = document.getElementById("statusBadge");
+    const setupPanel = document.getElementById("setupPanel");
+    const playPanel = document.getElementById("playPanel");
+    const connectBtn = document.getElementById("connectBtn");
+    const guardPad = document.getElementById("guardPad");
+    const padTitle = document.getElementById("padTitle");
+    const poseChip = document.getElementById("poseChip");
+    const dialBlade = document.getElementById("dialBlade");
+    const recenterBtn = document.getElementById("recenterBtn");
+    const btnP1 = document.getElementById("btnP1");
+    const btnP2 = document.getElementById("btnP2");
+    const telemetryEl = document.getElementById("telemetry");
+
+    let slot = 0;
+    let ws = null;
+    let sensorsReady = false;
+    let guardPressed = false;
+    let recenterPulse = false;
+    let visualRollRef = 0;
+    let lastTapTs = 0;
+
+    let latest = {
+      gx: 0, gy: 0, gz: 0,
+      ax: 0, ay: 0, az: 9.81,
+      lx: 0, ly: 0, lz: 0
+    };
+
+    function updateSlotUI() {
+      btnP1.className = slot === 0 ? "slot-btn active-p1" : "slot-btn";
+      btnP2.className = slot === 1 ? "slot-btn active-p2" : "slot-btn";
+    }
+    btnP1.addEventListener("click", () => { slot = 0; updateSlotUI(); });
+    btnP2.addEventListener("click", () => { slot = 1; updateSlotUI(); });
+
+    function setGuardState(active) {
+      if (guardPressed === active) return;
+      guardPressed = active;
+      guardPad.classList.toggle("pressed", active);
+      padTitle.textContent = active ? "🛡️ BLOQUEANDO" : "TOCA PARA BLOQUEAR";
+      if (active && navigator.vibrate) {
+        try { navigator.vibrate(14); } catch (_) {}
+      }
+    }
+
+    guardPad.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      const now = performance.now();
+      if (now - lastTapTs < 240) {
+        triggerRecenter();
+      }
+      lastTapTs = now;
+      setGuardState(true);
+    });
+    const releaseGuard = (e) => {
+      e.preventDefault();
+      setGuardState(false);
+    };
+    guardPad.addEventListener("pointerup", releaseGuard);
+    guardPad.addEventListener("pointercancel", releaseGuard);
+    guardPad.addEventListener("pointerleave", releaseGuard);
+
+    function triggerRecenter() {
+      recenterPulse = true;
+      const sag = Math.hypot(latest.ay, latest.az) || 1;
+      visualRollRef = Math.atan2(-latest.ax, sag);
+      if (navigator.vibrate) {
+        try { navigator.vibrate([18, 30, 18]); } catch (_) {}
+      }
+      telemetryEl.textContent = "Espada centrada.";
+    }
+
+    recenterBtn.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      triggerRecenter();
+    });
+
+    async function lockPortraitAndFullscreen() {
+      try {
+        if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+          await document.documentElement.requestFullscreen({ navigationUI: "hide" });
+        }
+      } catch (_) {}
+      try {
+        if (screen.orientation && screen.orientation.lock) {
+          await screen.orientation.lock("portrait-primary");
+        }
+      } catch (_) {
+        try {
+          if (screen.orientation && screen.orientation.lock) {
+            await screen.orientation.lock("portrait");
+          }
+        } catch (_) {}
+      }
+    }
+
+    document.addEventListener("visibilitychange", async () => {
+      if (document.visibilityState === "visible" && ws && ws.readyState === WebSocket.OPEN) {
+        await lockPortraitAndFullscreen();
+        if ("wakeLock" in navigator) {
+          try { await navigator.wakeLock.request("screen"); } catch (_) {}
+        }
+      }
+    });
+
+    async function requestSensors() {
+      if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
+        const res = await DeviceMotionEvent.requestPermission();
+        if (res !== "granted") throw new Error("Permiso de movimiento denegado");
+      }
+
+      if (!sensorsReady) {
+        sensorsReady = true;
+        window.addEventListener("devicemotion", (e) => {
+          const r = e.rotationRate || {};
+          const ag = e.accelerationIncludingGravity || {};
+          const ac = e.acceleration || {};
+          const d2r = Math.PI / 180.0;
+          latest.gx = (r.beta || 0) * d2r;
+          latest.gy = (r.alpha || 0) * d2r;
+          latest.gz = (r.gamma || 0) * d2r;
+          latest.ax = ag.x || 0;
+          latest.ay = ag.y || 0;
+          latest.az = ag.z || 0;
+          latest.lx = ac.x || 0;
+          latest.ly = ac.y || 0;
+          latest.lz = ac.z || 0;
+        });
+      }
+    }
+
+    function openSocket() {
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        ws.close();
+      }
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      ws = new WebSocket(`${proto}://${location.host}/ws`);
+
+      ws.onopen = () => {
+        statusBadge.textContent = `J${slot + 1} Activo`;
+        statusBadge.classList.add("ok");
+        setupPanel.classList.add("hidden");
+        playPanel.classList.add("visible");
+        triggerRecenter();
+      };
+      ws.onclose = () => {
+        statusBadge.textContent = "Desconectado";
+        statusBadge.classList.remove("ok");
+        setupPanel.classList.remove("hidden");
+        playPanel.classList.remove("visible");
+        setGuardState(false);
+        connectBtn.textContent = "Reconectar Mando";
+      };
+      ws.onerror = () => {
+        telemetryEl.textContent = "Error WebSocket: revisa el Wi-Fi o recarga.";
+      };
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.rumble && navigator.vibrate) {
+            navigator.vibrate(Math.min(200, Math.max(25, msg.rumble | 0)));
+          }
+        } catch (_) {}
+      };
+    }
+
+    connectBtn.addEventListener("click", async () => {
+      try {
+        await lockPortraitAndFullscreen();
+        await requestSensors();
+        if ("wakeLock" in navigator) {
+          try { await navigator.wakeLock.request("screen"); } catch (_) {}
+        }
+        openSocket();
+      } catch (err) {
+        telemetryEl.textContent = "No se pudieron activar sensores: " + err.message;
+      }
+    });
+
+    function describePose(deg) {
+      const a = Math.abs(deg);
+      if (a < 22) return "VERTICAL |";
+      if (a > 66) return "HORIZONTAL —";
+      return deg > 0 ? "DIAGONAL /" : "DIAGONAL \\";
+    }
+
+    setInterval(() => {
+      const sag = Math.hypot(latest.ay, latest.az) || 1;
+      let rawRoll = Math.atan2(-latest.ax, sag) - visualRollRef;
+      if (rawRoll > Math.PI) rawRoll -= Math.PI * 2;
+      if (rawRoll < -Math.PI) rawRoll += Math.PI * 2;
+      const deg = Math.max(-95, Math.min(95, rawRoll * 180 / Math.PI));
+      dialBlade.setAttribute("transform", `rotate(${deg.toFixed(1)} 100 100)`);
+      poseChip.textContent = `POSTURA: ${describePose(deg)} (${deg.toFixed(0)}°)`;
+
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const payload = {
+        s: slot,
+        g: [
+          Number(latest.gx.toFixed(3)),
+          Number(latest.gy.toFixed(3)),
+          Number(latest.gz.toFixed(3))
+        ],
+        a: [
+          Number(latest.ax.toFixed(3)),
+          Number(latest.ay.toFixed(3)),
+          Number(latest.az.toFixed(3))
+        ],
+        l: [
+          Number(latest.lx.toFixed(3)),
+          Number(latest.ly.toFixed(3)),
+          Number(latest.lz.toFixed(3))
+        ],
+        b: (guardPressed ? 1 : 0) | (recenterPulse ? 4 : 0)
+      };
+      recenterPulse = false;
+      ws.send(JSON.stringify(payload));
+      telemetryEl.textContent =
+        `J${slot + 1} | 60Hz OK | Hoja: ${deg.toFixed(0)}° | Guardia: ${guardPressed ? "ACTIVA" : "Auto"}`;
+    }, 16);
+  </script>
+</body>
+</html>

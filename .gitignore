@@ -1,0 +1,9 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+*.translation
+
+# Imported / generated certificates or temp files
+*.key
+*.crt
+*.pem
