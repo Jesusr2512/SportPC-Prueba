@@ -1,3 +1,4 @@
+@tool
 extends Node3D
 
 const AVATAR_SCENE := preload("res://scenes/AvatarFighter.tscn")
@@ -55,21 +56,31 @@ var _ai_target_roll: float = 0.0
 
 
 func _ready() -> void:
+	for ch in arena_root.get_children():
+		ch.free()
+	for ch in get_children():
+		if ch is AvatarFighter:
+			ch.free()
 	_build_arena_geometry()
 	_apply_ui_theme()
 	_spawn_fighters()
-	ring_bar.draw.connect(_on_draw_ring_bar)
-	reticle_hud.draw.connect(_on_draw_reticle)
 	victory_panel.visible = false
 	calib_panel.visible = false
+	reticle_hud.visible = false
 	recenter_p2_btn.visible = (GameConfig.match_mode == "2p")
 	p2_status_label.visible = true
 
-	if MotionHub.slots[0].source_type != MotionHub.SourceType.MOUSE:
-		begin_entry_calibration(true)
-	else:
-		MotionHub.recenter_slot(0)
-		_start_round()
+	if Engine.is_editor_hint():
+		_place_fighters_at_spawn()
+		_update_camera(1.0)
+		return
+
+	ring_bar.draw.connect(_on_draw_ring_bar)
+	reticle_hud.draw.connect(_on_draw_reticle)
+	MotionHub.recenter_slot(0)
+	if GameConfig.match_mode == "2p":
+		MotionHub.recenter_slot(1)
+	_start_round()
 
 
 func _apply_ui_theme() -> void:
@@ -195,39 +206,6 @@ func _build_arena_geometry() -> void:
 	center_ring.position = Vector3(0.0, 0.015, 0.0)
 	arena_root.add_child(center_ring)
 
-	# Switch Sports 1D combat track lane + red danger end zones
-	var lane := MeshInstance3D.new()
-	var lane_m := BoxMesh.new()
-	var track_len := (AvatarFighter.PLATFORM_RADIUS - 0.14) * 2.0
-	if GameConfig.match_mode == "1p":
-		lane_m.size = Vector3(1.36, 0.018, track_len)
-	else:
-		lane_m.size = Vector3(track_len, 0.018, 1.36)
-	lane.mesh = lane_m
-	var lane_mat := StandardMaterial3D.new()
-	lane_mat.albedo_color = Color(0.16, 0.22, 0.30, 0.92)
-	lane_mat.roughness = 0.65
-	lane.material_override = lane_mat
-	lane.position = Vector3(0.0, 0.01, 0.0)
-	arena_root.add_child(lane)
-
-	var danger_mat := StandardMaterial3D.new()
-	danger_mat.albedo_color = Color(0.95, 0.28, 0.22)
-	danger_mat.emission_enabled = true
-	danger_mat.emission = Color(0.92, 0.25, 0.18) * 0.35
-	for end_sign in [-1.0, 1.0]:
-		var end_strip := MeshInstance3D.new()
-		var em := BoxMesh.new()
-		if GameConfig.match_mode == "1p":
-			em.size = Vector3(1.36, 0.022, 0.72)
-			end_strip.position = Vector3(0.0, 0.014, end_sign * 4.02)
-		else:
-			em.size = Vector3(0.72, 0.022, 1.36)
-			end_strip.position = Vector3(end_sign * 4.02, 0.014, 0.0)
-		end_strip.mesh = em
-		end_strip.material_override = danger_mat
-		arena_root.add_child(end_strip)
-
 	# 4 Decorative perimeter lanterns outside ring
 	var pillar_mat := StandardMaterial3D.new()
 	pillar_mat.albedo_color = Color(0.24, 0.28, 0.36)
@@ -344,9 +322,9 @@ func confirm_entry_calibration() -> void:
 
 func _start_round() -> void:
 	_place_fighters_at_spawn()
-	MotionHub.recenter_yaw_slot(0)
+	MotionHub.recenter_slot(0)
 	if GameConfig.match_mode == "2p":
-		MotionHub.recenter_yaw_slot(1)
+		MotionHub.recenter_slot(1)
 	calib_panel.visible = false
 	round_timer = ROUND_DURATION
 	sudden_death = false
@@ -362,6 +340,8 @@ func _start_round() -> void:
 
 
 func _process(delta: float) -> void:
+	if Engine.is_editor_hint():
+		return
 	_fx_time += delta
 	if _water_ring:
 		var pulse := 1.0 + sin(_fx_time * 2.2) * 0.035
@@ -414,7 +394,7 @@ func _process(delta: float) -> void:
 				_drive_fighter_from_slot(f2, 1, delta, f1.position, true)
 			else:
 				_drive_ai(delta)
-			_enforce_duel_track(delta)
+			_enforce_3d_duel_spacing(delta)
 
 		MatchPhase.ROUND_END:
 			phase_timer -= delta
@@ -446,51 +426,44 @@ func _update_auto_guard_preview() -> void:
 		f1.auto_guard_ready = false
 
 
-func _enforce_duel_track(delta: float) -> void:
+func _enforce_3d_duel_spacing(delta: float) -> void:
 	if f1.state == AvatarFighter.State.FALLING or f2.state == AvatarFighter.State.FALLING:
 		return
-	var track := Vector2(0.0, -1.0) if GameConfig.match_mode == "1p" else Vector2(1.0, 0.0)
-	var lat := Vector2(-track.y, track.x)
 	var p1 := Vector2(f1.position.x, f1.position.z)
 	var p2 := Vector2(f2.position.x, f2.position.z)
+	var delta_xz := p2 - p1
+	var sep := delta_xz.length()
+	var dir_1_to_2 := delta_xz / sep if sep > 0.01 else Vector2(0.0, -1.0)
 
-	var s1 := p1.dot(track)
-	var s2 := p2.dot(track)
-	var l1 := lerpf(p1.dot(lat), 0.0, clampf(delta * 16.0, 0.0, 1.0))
-	var l2 := lerpf(p2.dot(lat), 0.0, clampf(delta * 16.0, 0.0, 1.0))
-
-	var sep := s2 - s1
-	var min_sep := DUEL_DISTANCE * 0.88
+	var min_sep := DUEL_DISTANCE * 0.85
 	if sep < min_sep:
 		var push_apart := (min_sep - sep) * 0.5
-		s1 -= push_apart
-		s2 += push_apart
+		p1 -= dir_1_to_2 * push_apart
+		p2 += dir_1_to_2 * push_apart
 	elif sep > DUEL_DISTANCE:
-		if absf(s1) >= AvatarFighter.PLATFORM_RADIUS or absf(s2) >= AvatarFighter.PLATFORM_RADIUS:
+		if p1.length() >= AvatarFighter.PLATFORM_RADIUS or p2.length() >= AvatarFighter.PLATFORM_RADIUS:
 			return
 		var excess := sep - DUEL_DISTANCE
-		var v1_back := -f1.velocity_xz.dot(track)
-		var v2_back := f2.velocity_xz.dot(track)
-		var max_step := (10.5 if (v1_back > 0.25 or v2_back > 0.25) else 5.5) * delta
+		var v1_back := -f1.velocity_xz.dot(dir_1_to_2)
+		var v2_back := f2.velocity_xz.dot(dir_1_to_2)
+		var max_step := (10.5 if (v1_back > 0.25 or v2_back > 0.25) else 4.2) * delta
 		var step := minf(excess, max_step)
 		if v2_back > 0.20 or f2.guard_break_timer > 0.0 or (f2.state == AvatarFighter.State.STUNNED and v2_back >= v1_back):
-			s1 += step
+			p1 += dir_1_to_2 * step
 		elif v1_back > 0.20 or f1.guard_break_timer > 0.0 or (f1.state == AvatarFighter.State.STUNNED and v1_back > v2_back):
-			s2 -= step
+			p2 -= dir_1_to_2 * step
 		elif f1.state == AvatarFighter.State.SLASHING and f2.state != AvatarFighter.State.SLASHING:
-			s1 += step
+			p1 += dir_1_to_2 * step
 		elif f2.state == AvatarFighter.State.SLASHING and f1.state != AvatarFighter.State.SLASHING:
-			s2 -= step
-		else:
-			s1 += step * 0.5
-			s2 -= step * 0.5
+			p2 -= dir_1_to_2 * step
+		elif sep > DUEL_DISTANCE + 0.65:
+			p1 += dir_1_to_2 * (step * 0.5)
+			p2 -= dir_1_to_2 * (step * 0.5)
 
-	var final_1 := track * s1 + lat * l1
-	var final_2 := track * s2 + lat * l2
-	f1.position.x = final_1.x
-	f1.position.z = final_1.y
-	f2.position.x = final_2.x
-	f2.position.z = final_2.y
+	f1.position.x = p1.x
+	f1.position.z = p1.y
+	f2.position.x = p2.x
+	f2.position.z = p2.y
 
 
 func _drive_fighter_from_slot(fighter: AvatarFighter, slot_idx: int, delta: float, opp_pos: Vector3, can_act: bool) -> void:
@@ -767,6 +740,8 @@ func _update_banner(delta: float) -> void:
 
 
 func _update_hud() -> void:
+	if Engine.is_editor_hint():
+		return
 	score_p1_label.text = "J1 (Azul): %s" % _dots(wins_p1)
 	var label2 := "J2 (Coral)" if GameConfig.match_mode == "2p" else "IA (Coral)"
 	score_p2_label.text = "%s: %s" % [label2, _dots(wins_p2)]
@@ -798,10 +773,8 @@ func _update_hud() -> void:
 			" | PREPARANDO CORTE" if f2.state == AvatarFighter.State.WINDUP else ""
 		]
 
-	reticle_hud.visible = (GameConfig.match_mode == "1p" and phase != MatchPhase.MATCH_OVER)
+	reticle_hud.visible = false
 	ring_bar.queue_redraw()
-	if reticle_hud.visible:
-		reticle_hud.queue_redraw()
 
 
 func _on_draw_ring_bar() -> void:

@@ -1,3 +1,4 @@
+@tool
 class_name AvatarFighter
 extends Node3D
 
@@ -58,6 +59,9 @@ var _halo_mat: StandardMaterial3D
 
 
 func _ready() -> void:
+	var old := get_node_or_null("VisualRoot")
+	if old != null:
+		old.free()
 	_build_visuals()
 	if _camera_translucent:
 		set_camera_translucent(true)
@@ -273,13 +277,13 @@ func _build_visuals() -> void:
 	# Guard Halo
 	_guard_halo = MeshInstance3D.new()
 	var halo_m := TorusMesh.new()
-	halo_m.inner_radius = 0.36
-	halo_m.outer_radius = 0.44
+	halo_m.inner_radius = 0.34
+	halo_m.outer_radius = 0.46
 	_guard_halo.mesh = halo_m
 	_halo_mat = StandardMaterial3D.new()
-	_halo_mat.albedo_color = Color(team_color.r, team_color.g, team_color.b, 0.65)
+	_halo_mat.albedo_color = Color(team_color.r, team_color.g, team_color.b, 0.72)
 	_halo_mat.emission_enabled = true
-	_halo_mat.emission = team_color * 1.3
+	_halo_mat.emission = team_color * 1.5
 	_halo_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_guard_halo.material_override = _halo_mat
 	_guard_halo.rotation_degrees = Vector3(0.0, 0.0, 90.0)
@@ -287,10 +291,10 @@ func _build_visuals() -> void:
 	_guard_halo.visible = false
 	_blade_roll_pivot.add_child(_guard_halo)
 
-	# Telegraph attack plane indicator (visible during WINDUP)
+	# Telegraph attack plane indicator (visible in 3D world space during WINDUP)
 	_telegraph_bar = MeshInstance3D.new()
 	var tele_m := BoxMesh.new()
-	tele_m.size = Vector3(0.05, 1.85, 0.10)
+	tele_m.size = Vector3(0.08, 1.88, 0.13)
 	_telegraph_bar.mesh = tele_m
 	_telegraph_mat = StandardMaterial3D.new()
 	_telegraph_mat.albedo_color = Color(1.0, 0.88, 0.2, 0.85)
@@ -446,7 +450,7 @@ func get_world_slash_axis(slash_dir: Vector2) -> Vector3:
 	return (global_transform.basis * local_dir).normalized()
 
 
-func step_fighter(delta: float, _move_input: Vector2, opponent_pos: Vector3, can_act: bool) -> void:
+func step_fighter(delta: float, move_input: Vector2, opponent_pos: Vector3, can_act: bool) -> void:
 	_idle_t += delta
 	if guard_break_timer > 0.0:
 		guard_break_timer = maxf(0.0, guard_break_timer - delta)
@@ -468,6 +472,13 @@ func step_fighter(delta: float, _move_input: Vector2, opponent_pos: Vector3, can
 		facing_dir = to_opp.normalized()
 	var target_yaw := atan2(-facing_dir.y, facing_dir.x)
 	rotation.y = lerp_angle(rotation.y, target_yaw, clampf(delta * 14.0, 0.0, 1.0))
+
+	if can_act and state == State.NORMAL and move_input.length() > 0.05:
+		var fwd := Vector2(facing_dir.x, facing_dir.y).normalized()
+		var right := Vector2(-fwd.y, fwd.x)
+		var move_xz := right * (move_input.x * 2.35) + fwd * (-move_input.y * 1.85)
+		position.x += move_xz.x * delta
+		position.z += move_xz.y * delta
 
 	if hit_flash_timer > 0.0:
 		hit_flash_timer = maxf(0.0, hit_flash_timer - delta)
@@ -539,20 +550,23 @@ func step_fighter(delta: float, _move_input: Vector2, opponent_pos: Vector3, can
 			var e := blade_orientation.get_euler()
 			if effective_guard:
 				_sword_mat.emission = Color(0.35, 0.92, 1.0) * 1.55 if not is_charged else Color(1.0, 0.82, 0.2) * 2.0
-				# Switch Sports Two-Handed Guard: left hand supports upper spine of blade across chest
+				# Switch Sports Two-Handed Guard with full 3D depth tilt/yaw
 				_hand_l.position = _hand_l.position.lerp(Vector3(0.0, 0.68, 0.0), delta * 20.0)
-				_upper_body.rotation = _upper_body.rotation.lerp(Vector3(0.0, -0.10, -0.08), delta * 16.0)
-				_arm_pivot.position = _arm_pivot.position.lerp(Vector3(0.46, 0.48, 0.0), delta * 18.0)
+				_upper_body.rotation = _upper_body.rotation.lerp(Vector3(clampf(e.x * 0.16, -0.18, 0.18), -0.10 + clampf(e.y * 0.22, -0.22, 0.22), -0.08), delta * 16.0)
+				_arm_pivot.position = _arm_pivot.position.lerp(Vector3(0.46 + clampf(-e.x * 0.08, -0.06, 0.10), 0.48 + clampf(e.x * 0.10, -0.08, 0.10), clampf(-e.y * 0.16, -0.14, 0.14)), delta * 18.0)
 				_blade_roll_pivot.rotation = _blade_roll_pivot.rotation.lerp(Vector3(blade_roll_rad, 0.0, 0.0), delta * 26.0)
-				_sword_tilt_pivot.rotation = _sword_tilt_pivot.rotation.lerp(Vector3(0.0, 0.0, -0.04), delta * 20.0)
+				_sword_tilt_pivot.rotation = _sword_tilt_pivot.rotation.lerp(
+					Vector3(0.0, clampf(e.y * 0.45, -0.45, 0.45), clampf(-0.04 + e.x * 0.35, -0.42, 0.38)),
+					delta * 20.0
+				)
 			else:
 				_sword_mat.emission = (Color(0.35, 1.0, 0.65) * 1.25) if (auto_guard_ready and not is_charged) else base_sword_emission
 				_hand_l.position = _hand_l.position.lerp(Vector3(-0.02, -0.03, -0.02), delta * 18.0)
-				_upper_body.rotation = _upper_body.rotation.lerp(Vector3(0.0, clampf(e.y * 0.22, -0.22, 0.22), 0.0), delta * 12.0)
-				_arm_pivot.position = _arm_pivot.position.lerp(Vector3(0.38, 0.42, 0.05), delta * 16.0)
+				_upper_body.rotation = _upper_body.rotation.lerp(Vector3(clampf(e.x * 0.18, -0.22, 0.22), clampf(e.y * 0.28, -0.28, 0.28), 0.0), delta * 12.0)
+				_arm_pivot.position = _arm_pivot.position.lerp(Vector3(0.38 + clampf(-e.x * 0.10, -0.08, 0.12), 0.42 + clampf(e.x * 0.12, -0.10, 0.12), 0.05 + clampf(-e.y * 0.20, -0.18, 0.18)), delta * 16.0)
 				_blade_roll_pivot.rotation = _blade_roll_pivot.rotation.lerp(Vector3(blade_roll_rad, 0.0, 0.0), delta * 28.0)
 				_sword_tilt_pivot.rotation = _sword_tilt_pivot.rotation.lerp(
-					Vector3(0.0, clampf(e.y * 0.65, -0.65, 0.65), clampf(-0.36 + e.x * 0.48, -1.10, 0.42)),
+					Vector3(0.0, clampf(e.y * 0.72, -0.72, 0.72), clampf(-0.36 + e.x * 0.55, -1.15, 0.48)),
 					delta * 20.0
 				)
 

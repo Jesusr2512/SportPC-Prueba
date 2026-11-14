@@ -8,8 +8,11 @@ Prototipo experimental en **Godot Engine 4.7** inspirado en **Nintendo Switch Sp
 
 ## ✨ Qué incluye esta prueba
 
-- **Modo Chambara (1P vs IA y 2P Local)**:
-  - Carril de duelo 1D sobre plataforma flotante con avance automático tras empujes.
+- **Entorno 3D completo (Menú principal 3D + Arena 3D + Sala 3D)**:
+  - Menú principal en **3D en vivo** donde ves a los luchadores sobre la isla y pruebas tu espada en tiempo real.
+  - Combate sobre **plataforma circular 360° en 3D** con movimiento lateral/profundidad (WASD / stick) y cámara orbital automática tras el hombro.
+- **Modo Chambara 3D (1P vs IA y 2P Local)**:
+  - Espada en 3D con inclinación, orientación espacial y avance automático al empujar al rival.
   - Cortes alineados al ángulo de la espada (`0°`, `±45°`, `±90°`).
   - Bloqueo perpendicular con aturdimiento y carga de contraataque, choque de espadas, guardia superada paralela y combo multi-golpe.
   - Tres niveles de dificultad de IA (`Novato`, `Pro`, `Campeón`).
