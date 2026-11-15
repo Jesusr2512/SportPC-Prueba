@@ -439,6 +439,13 @@ func _drive_human_slot(slot_idx: int, fighter: AvatarFighter, _delta: float) -> 
 		if s.just_dodge_pressed:
 			fighter.trigger_dodge(s.move_axis)
 			return Vector2.ZERO
+		if slot_idx == 0 and s.source_type != MotionHub.SourceType.MOUSE:
+			if Input.is_action_just_pressed("ui_left"):
+				fighter.trigger_dodge(Vector2(-1.0, 0.0))
+				return Vector2.ZERO
+			if Input.is_action_just_pressed("ui_right"):
+				fighter.trigger_dodge(Vector2(1.0, 0.0))
+				return Vector2.ZERO
 		if s.buffered_strike_timer > 0.0:
 			var atk_t: int = s.buffered_strike_type
 			var dir: Vector2 = s.buffered_strike_dir
@@ -449,14 +456,8 @@ func _drive_human_slot(slot_idx: int, fighter: AvatarFighter, _delta: float) -> 
 			fighter.trigger_slash(s.fusion.last_slash_dir, s.fusion.last_slash_power, s.fusion.last_slash_type)
 			s.buffered_strike_timer = 0.0
 
-	var mv: Vector2 = s.move_axis
-	if slot_idx == 0 and mv.length() < 0.05:
-		var kx := Input.get_axis("ui_left", "ui_right")
-		var ky := Input.get_axis("ui_up", "ui_down")
-		mv = Vector2(kx, ky).limit_length(1.0)
-	if Input.is_action_just_pressed("ui_accept") and slot_idx == 0 and s.source_type != MotionHub.SourceType.MOUSE:
-		fighter.trigger_dodge(mv)
-	return mv
+	# Locked Switch Sports duel: zero free walking (no ui_up/ui_down axis drift!)
+	return Vector2.ZERO
 
 
 func _drive_ai(delta: float) -> Vector2:
@@ -484,23 +485,17 @@ func _drive_ai(delta: float) -> Vector2:
 		_ai_guard_pressure = maxf(0.0, _ai_guard_pressure - delta * 2.0)
 
 	if _ai_strafe_timer <= 0.0:
-		_ai_strafe_timer = randf_range(0.55, 1.15)
-		_ai_move.x = randf_range(-0.85, 0.85)
+		_ai_strafe_timer = randf_range(0.65, 1.35)
+		if level >= 1 and f1.state == AvatarFighter.State.SLASHING and randf() < 0.28 and f2.state == AvatarFighter.State.NORMAL and f2.dodge_cooldown_timer <= 0.0:
+			f2.trigger_dodge(Vector2(-1.0 if randf() < 0.5 else 1.0, 0.0))
 
-	# Footwork: hold sweetspot distance ~1.8m, stay centered away from abyss/lava
-	if edge_danger > 0.68:
+	# Escape cliff edge via lateral sidestep dodge when cornered
+	if level >= 1 and edge_danger > 0.80 and f2.state == AvatarFighter.State.NORMAL and f2.dodge_cooldown_timer <= 0.0:
 		var back_to_center := -f2_pos.normalized()
-		var fwd := f2.facing_dir
-		var right := Vector2(-fwd.y, fwd.x)
-		_ai_move = Vector2(back_to_center.dot(right), -back_to_center.dot(fwd)).limit_length(1.0)
-		if level >= 2 and edge_danger > 0.80 and f2.state == AvatarFighter.State.NORMAL and f2.dodge_cooldown_timer <= 0.0:
-			f2.trigger_dodge(_ai_move)
-	elif dist > 2.35:
-		_ai_move.y = -0.78
-	elif dist < 1.38:
-		_ai_move.y = 0.65
-	else:
-		_ai_move.y = 0.0
+		var right := Vector2(-f2.facing_dir.y, f2.facing_dir.x)
+		var dodge_sign := 1.0 if back_to_center.dot(right) >= 0.0 else -1.0
+		f2.trigger_dodge(Vector2(dodge_sign, 0.0))
+	_ai_move = Vector2.ZERO
 
 	if f2.state == AvatarFighter.State.NORMAL:
 		if f1.state == AvatarFighter.State.STUNNED and _ai_timer > 0.28:
@@ -835,19 +830,28 @@ func _clear_active_waves() -> void:
 	_waves.clear()
 
 
-func _enforce_3d_duel_spacing(_delta: float) -> void:
+func _enforce_3d_duel_spacing(delta: float) -> void:
 	if f1.state == AvatarFighter.State.FALLING or f2.state == AvatarFighter.State.FALLING:
 		return
 	var diff := Vector2(f2.position.x - f1.position.x, f2.position.z - f1.position.z)
 	var dist := diff.length()
 	var n := diff.normalized() if dist > 0.05 else Vector2(0.0, -1.0)
-	# Only push apart overlapping fighter bodies (< 1.12m); NEVER pull players together magnetically!
 	if dist < 1.12:
 		var push := (1.12 - dist) * 0.5
 		f1.position.x -= n.x * push
 		f1.position.z -= n.y * push
 		f2.position.x += n.x * push
 		f2.position.z += n.y * push
+	elif dist > 2.12 and f1.state == AvatarFighter.State.NORMAL and f2.state == AvatarFighter.State.NORMAL:
+		var e1 := DojoStageScript.get_edge_ratio(Vector2(f1.position.x, f1.position.z), _stage_type)
+		var e2 := DojoStageScript.get_edge_ratio(Vector2(f2.position.x, f2.position.z), _stage_type)
+		var close_step := minf((dist - 1.95) * 2.4, 1.45) * delta
+		var w1 := 0.82 if e1 <= e2 else 0.18
+		var w2 := 1.0 - w1
+		f1.position.x += n.x * (close_step * w1)
+		f1.position.z += n.y * (close_step * w1)
+		f2.position.x -= n.x * (close_step * w2)
+		f2.position.z -= n.y * (close_step * w2)
 
 
 func _on_fighter_fell(loser: AvatarFighter) -> void:
@@ -1014,7 +1018,7 @@ func _update_hud() -> void:
 
 	if _hub != null:
 		var s0 = _hub.slots[0]
-		var state0 := "⚡ ESPADA MAESTRA!" if f1.spirit >= 100.0 else ("🌟 CONTRAATAQUE!" if f1.is_charged else ("🛡️ BLOQUEO" if f1.is_guarding else "Listo"))
+		var state0: String = "⚡ ESPADA MAESTRA!" if f1.spirit >= 100.0 else ("🌟 CONTRAATAQUE!" if f1.is_charged else ("🛡️ BLOQUEO" if f1.is_guarding else s0.fusion.get_aim_label()))
 		status_p1_lbl.text = "J1 [%s] | %s | Guardia %d%% | Esp %d%%" % [
 			s0.device_name, state0, int(roundf(f1.guard_meter)), int(roundf(f1.spirit))
 		]

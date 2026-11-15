@@ -239,50 +239,112 @@
       gap: 8px;
       min-height: 0;
     }
-    .control-grid.one-hand {
-      grid-template-columns: 1fr;
-    }
-    .move-pad {
+    .aim-pad {
       position: relative;
       border-radius: 24px;
       border: 2px solid rgba(148, 163, 184, 0.35);
-      background: radial-gradient(circle at 50% 50%, rgba(30, 58, 138, 0.34), rgba(15, 23, 42, 0.85));
+      background: radial-gradient(circle at 50% 50%, rgba(30, 58, 138, 0.36), rgba(15, 23, 42, 0.88));
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
+      justify-content: space-between;
+      padding: 10px 8px;
       overflow: hidden;
+      transition: border-color 0.08s ease, box-shadow 0.08s ease;
     }
-    .control-grid.one-hand .move-pad { display: none; }
-    .stick-ring {
-      width: 116px;
-      height: 116px;
+    .aim-pad.hit-flash {
+      border-color: #4ade80;
+      box-shadow: 0 0 26px rgba(74, 222, 128, 0.55);
+    }
+    .aim-pose-pill {
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.4px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(56, 189, 248, 0.16);
+      border: 1px solid rgba(56, 189, 248, 0.45);
+      color: #7dd3fc;
+      text-align: center;
+    }
+    .aim-reticle {
+      width: 118px;
+      height: 118px;
       border-radius: 50%;
-      border: 2px dashed rgba(125, 211, 252, 0.45);
+      border: 2px dashed rgba(125, 211, 252, 0.38);
+      background: rgba(2, 6, 23, 0.45);
       position: relative;
       display: flex;
       align-items: center;
       justify-content: center;
       pointer-events: none;
     }
-    .stick-knob {
-      width: 48px;
-      height: 48px;
-      border-radius: 50%;
-      background: radial-gradient(circle, #7dd3fc, #0284c7);
-      box-shadow: 0 0 18px rgba(56, 189, 248, 0.65);
-      transform: translate(0px, 0px);
+    .aim-reticle::before {
+      content: "";
+      position: absolute;
+      width: 1px;
+      height: 92px;
+      background: rgba(148, 163, 184, 0.25);
+    }
+    .aim-reticle::after {
+      content: "";
+      position: absolute;
+      width: 92px;
+      height: 1px;
+      background: rgba(148, 163, 184, 0.25);
+    }
+    .aim-dir-tag {
+      position: absolute;
+      font-size: 9px;
+      font-weight: 800;
+      color: rgba(148, 163, 184, 0.8);
       pointer-events: none;
     }
+    .aim-dir-tag.up { top: 4px; left: 50%; transform: translateX(-50%); }
+    .aim-dir-tag.dn { bottom: 4px; left: 50%; transform: translateX(-50%); }
+    .aim-dir-tag.lf { left: 6px; top: 50%; transform: translateY(-50%); }
+    .aim-dir-tag.rt { right: 6px; top: 50%; transform: translateY(-50%); }
+    .aim-dot {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #ffffff 10%, #38bdf8 55%, #0284c7 100%);
+      box-shadow: 0 0 14px rgba(56, 189, 248, 0.85);
+      transform: translate(0px, 0px);
+      transition: transform 0.04s linear;
+      z-index: 2;
+    }
+    .brisk-wrap {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .brisk-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      font-weight: 800;
+      color: #a7f3d0;
+    }
+    .brisk-track {
+      height: 7px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.10);
+      overflow: hidden;
+    }
+    .brisk-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #38bdf8, #4ade80, #fde047);
+      transition: width 0.05s linear;
+    }
     .pad-hint {
-      position: absolute;
-      bottom: 10px;
-      left: 8px;
-      right: 8px;
-      text-align: center;
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 700;
       color: #93c5fd;
+      text-align: center;
       pointer-events: none;
     }
 
@@ -354,8 +416,7 @@
         <div id="statusBadge" class="badge">Desconectado</div>
       </div>
       <div class="top-btn-group">
-        <button id="modeBtn" class="top-btn mode" type="button">2 Manos</button>
-        <button id="guideBtn" class="top-btn guide" type="button">❔</button>
+        <button id="guideBtn" class="top-btn guide" type="button">❔ Guía</button>
         <button id="recenterBtn" class="top-btn" type="button">🎯 CENTRAR</button>
       </div>
     </div>
@@ -371,7 +432,7 @@
       <div id="visualGuideContent" class="tip-box">
         <div class="demo-row">
           <div class="demo-card">
-            <b>1. Tajo Real o Empuje</b>
+            <b>1. Golpe Brusco = Tajo</b>
             <svg viewBox="0 0 110 86" width="96" height="74">
               <rect x="86" y="14" width="14" height="22" rx="2" fill="#1e293b" stroke="#94a3b8" stroke-width="2" />
               <text x="93" y="45" fill="#94a3b8" font-size="7" text-anchor="middle">PC</text>
@@ -382,10 +443,10 @@
               </g>
               <path class="svg-slash-arc" d="M 52 10 Q 82 28 74 62" fill="none" stroke="#4ade80" stroke-width="4" stroke-linecap="round" />
             </svg>
-            <div>Apunta al PC (~45°). Mueve con <b>velocidad natural de muñeca o brazo</b> para cortar; más rápido = más fuerza.</div>
+            <div>Apunta <b>Al Frente, Arriba, Abajo o Lados</b> (1:1). Da un <b>golpe brusco</b> con brazo o muñeca para atacar.</div>
           </div>
           <div class="demo-card">
-            <b>2. Gira Muñeca y Parry</b>
+            <b>2. Gira Hoja y Parry</b>
             <svg viewBox="0 0 100 86" width="90" height="74">
               <circle cx="50" cy="44" r="32" fill="none" stroke="rgba(125,211,252,0.25)" stroke-width="3" />
               <g class="svg-twist-blade">
@@ -393,11 +454,11 @@
                 <line x1="50" y1="42" x2="50" y2="12" stroke="#38bdf8" stroke-width="5" stroke-linecap="round" />
               </g>
             </svg>
-            <div>Rotar la muñeca gira la hoja 1:1 <b>sin disparar cortes por error</b>. Pulsa <b>GUARDIA</b> justo antes del impacto = <b>Parry Perfecto</b>.</div>
+            <div>Rotar la muñeca gira el filo <b>sin atacar por error</b>. Pulsa <b>GUARDIA</b> justo antes del impacto = <b>Parry Perfecto</b>.</div>
           </div>
         </div>
-        • <b>Moverse / Esquivar:</b> en modo 2 Manos usa el stick izquierdo (desliza rápido = esquiva).<br />
-        • <b>Centrar rápido:</b> apunta hacia el monitor en tu postura cómoda y pulsa <b>🎯 CENTRAR</b> arriba.
+        • <b>Sin caminar libre:</b> concéntrate en el duelo; desliza rápido a los lados o pulsa <b>◀ Esquiva / Esquiva ▶</b>.<br />
+        • <b>Centrar rápido:</b> apunta al monitor y pulsa <b>🎯 CENTRAR</b> arriba en cualquier momento.
       </div>
     </div>
 
@@ -423,11 +484,20 @@
       </div>
 
       <div id="controlGrid" class="control-grid">
-        <div id="movePad" class="move-pad">
-          <div class="stick-ring">
-            <div id="stickKnob" class="stick-knob"></div>
+        <div id="aimPad" class="aim-pad">
+          <div id="aimPosePill" class="aim-pose-pill">MIRA: AL FRENTE</div>
+          <div class="aim-reticle">
+            <span class="aim-dir-tag up">ARRIBA</span>
+            <span class="aim-dir-tag dn">ABAJO</span>
+            <span class="aim-dir-tag lf">IZQ</span>
+            <span class="aim-dir-tag rt">DER</span>
+            <div id="aimDot" class="aim-dot"></div>
           </div>
-          <div class="pad-hint">Mover • Desliza rápido = Esquivar</div>
+          <div class="brisk-wrap">
+            <div class="brisk-label"><span>IMPULSO BRUSCO</span><span id="briskLabelVal">Listo</span></div>
+            <div class="brisk-track"><div id="briskFill" class="brisk-fill"></div></div>
+          </div>
+          <div class="pad-hint">Desliza ◀ o ▶ rápido para esquivar</div>
         </div>
 
         <div id="guardPad" class="guard-pad" role="button" aria-label="Bloquear">
@@ -438,9 +508,9 @@
       </div>
 
       <div class="bottom-steps">
-        <button id="dodgeLeftBtn" class="step-btn" type="button">◀ Esquiva</button>
+        <button id="dodgeLeftBtn" class="step-btn" type="button">◀ Esquiva Izq</button>
         <button id="thrustBtn" class="step-btn thrust" type="button">⚡ Estocada</button>
-        <button id="dodgeRightBtn" class="step-btn" type="button">Esquiva ▶</button>
+        <button id="dodgeRightBtn" class="step-btn" type="button">Esquiva Der ▶</button>
       </div>
     </div>
 
@@ -458,10 +528,11 @@
     const setupPanel = document.getElementById("setupPanel");
     const playPanel = document.getElementById("playPanel");
     const connectBtn = document.getElementById("connectBtn");
-    const modeBtn = document.getElementById("modeBtn");
-    const controlGrid = document.getElementById("controlGrid");
-    const movePad = document.getElementById("movePad");
-    const stickKnob = document.getElementById("stickKnob");
+    const aimPad = document.getElementById("aimPad");
+    const aimPosePill = document.getElementById("aimPosePill");
+    const aimDot = document.getElementById("aimDot");
+    const briskFill = document.getElementById("briskFill");
+    const briskLabelVal = document.getElementById("briskLabelVal");
     const guardPad = document.getElementById("guardPad");
     const guardIcon = document.getElementById("guardIcon");
     const padTitle = document.getElementById("padTitle");
@@ -490,21 +561,24 @@
     const accelSign = isIOS ? -1.0 : 1.0;
 
     let slot = 0;
-    let twoHandMode = true;
     let ws = null;
     let sensorsReady = false;
     let guardPressed = false;
     let guardPointerId = null;
     let recenterPulse = false;
     let dodgePulse = false;
+    let dodgeDir = 0;
     let thrustPulse = false;
     let seqCounter = 0;
 
-    let movePointerId = null;
-    let moveOrigin = { x: 0, y: 0, t: 0 };
-    let moveVec = { x: 0, y: 0 };
+    let swipePointerId = null;
+    let swipeOrigin = { x: 0, t: 0 };
 
     let serverRollDeg = null;
+    let serverAim = [0, 0];
+    let serverPose = "AL FRENTE";
+    let serverSpeed = 0;
+    let hitFlashUntil = 0;
     let serverSpirit = 0;
     let serverGuardMeter = 100;
 
@@ -529,15 +603,6 @@
     }
     btnP1.addEventListener("click", () => { slot = 0; updateSlotUI(); });
     btnP2.addEventListener("click", () => { slot = 1; updateSlotUI(); });
-
-    modeBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      twoHandMode = !twoHandMode;
-      controlGrid.classList.toggle("one-hand", !twoHandMode);
-      modeBtn.textContent = twoHandMode ? "2 Manos" : "1 Mano";
-      moveVec = { x: 0, y: 0 };
-      stickKnob.style.transform = "translate(0px, 0px)";
-    });
 
     function setGuardState(active) {
       if (guardPressed === active) return;
@@ -567,56 +632,46 @@
     guardPad.addEventListener("pointerup", endGuard);
     guardPad.addEventListener("pointercancel", endGuard);
 
-    // Virtual stick + swipe-dash for Left Hand
-    movePad.addEventListener("pointerdown", (e) => {
+    // Quick horizontal swipe on aimPad = sidestep dodge (ZERO free walking!)
+    aimPad.addEventListener("pointerdown", (e) => {
       e.preventDefault();
-      if (movePointerId === null) {
-        movePointerId = e.pointerId;
-        try { movePad.setPointerCapture(e.pointerId); } catch (_) {}
-        moveOrigin = { x: e.clientX, y: e.clientY, t: performance.now() };
+      if (swipePointerId === null) {
+        swipePointerId = e.pointerId;
+        try { aimPad.setPointerCapture(e.pointerId); } catch (_) {}
+        swipeOrigin = { x: e.clientX, t: performance.now() };
       }
     });
-    movePad.addEventListener("pointermove", (e) => {
-      if (e.pointerId !== movePointerId) return;
+    aimPad.addEventListener("pointermove", (e) => {
+      if (e.pointerId !== swipePointerId) return;
       e.preventDefault();
-      const maxR = 46;
-      const dx = e.clientX - moveOrigin.x;
-      const dy = e.clientY - moveOrigin.y;
-      const dist = Math.hypot(dx, dy);
-      const scale = dist > maxR ? maxR / dist : 1.0;
-      const cx = dx * scale;
-      const cy = dy * scale;
-      stickKnob.style.transform = `translate(${cx.toFixed(1)}px, ${cy.toFixed(1)}px)`;
-      moveVec.x = Math.max(-1, Math.min(1, cx / maxR));
-      moveVec.y = Math.max(-1, Math.min(1, cy / maxR));
-
-      const dtMs = performance.now() - moveOrigin.t;
-      if (dist > 38 && dtMs < 130 && Math.abs(dx) > Math.abs(dy) * 1.2) {
-        dodgePulse = true;
-        moveOrigin.t = performance.now() + 300;
+      const dx = e.clientX - swipeOrigin.x;
+      const dtMs = performance.now() - swipeOrigin.t;
+      if (Math.abs(dx) > 36 && dtMs < 180) {
+        triggerDodge(dx > 0 ? 1 : -1);
+        swipeOrigin.x = e.clientX;
+        swipeOrigin.t = performance.now() + 260;
       }
     });
-    const endMove = (e) => {
-      if (e.pointerId !== movePointerId) return;
-      e.preventDefault();
-      movePointerId = null;
-      moveVec = { x: 0, y: 0 };
-      stickKnob.style.transform = "translate(0px, 0px)";
+    const endSwipe = (e) => {
+      if (e.pointerId !== swipePointerId) return;
+      swipePointerId = null;
     };
-    movePad.addEventListener("pointerup", endMove);
-    movePad.addEventListener("pointercancel", endMove);
+    aimPad.addEventListener("pointerup", endSwipe);
+    aimPad.addEventListener("pointercancel", endSwipe);
+
+    function triggerDodge(dir) {
+      dodgeDir = dir >= 0 ? 1 : -1;
+      dodgePulse = true;
+      if (navigator.vibrate) try { navigator.vibrate(16); } catch (_) {}
+    }
 
     dodgeLeftBtn.addEventListener("pointerdown", (e) => {
       e.preventDefault();
-      moveVec = { x: -1, y: 0 };
-      dodgePulse = true;
-      setTimeout(() => { if (movePointerId === null) moveVec = { x: 0, y: 0 }; }, 140);
+      triggerDodge(-1);
     });
     dodgeRightBtn.addEventListener("pointerdown", (e) => {
       e.preventDefault();
-      moveVec = { x: 1, y: 0 };
-      dodgePulse = true;
-      setTimeout(() => { if (movePointerId === null) moveVec = { x: 0, y: 0 }; }, 140);
+      triggerDodge(1);
     });
     thrustBtn.addEventListener("pointerdown", (e) => {
       e.preventDefault();
@@ -783,6 +838,10 @@
             navigator.vibrate(msg.v);
           }
           if (typeof msg.roll === "number") serverRollDeg = msg.roll;
+          if (Array.isArray(msg.aim) && msg.aim.length >= 2) serverAim = [msg.aim[0], msg.aim[1]];
+          if (typeof msg.pose === "string") serverPose = msg.pose;
+          if (typeof msg.spd === "number") serverSpeed = msg.spd;
+          if (msg.hit === 1) hitFlashUntil = performance.now() + 240;
           if (typeof msg.spirit === "number") {
             serverSpirit = msg.spirit;
             spiritFill.style.width = `${Math.max(0, Math.min(100, serverSpirit))}%`;
@@ -824,6 +883,18 @@
       dialBlade.setAttribute("transform", `rotate(${deg.toFixed(1)} 100 100)`);
       poseChip.textContent = `HOJA: ${describePose(deg)} (${deg.toFixed(0)}°)`;
 
+      const ax = Math.max(-1, Math.min(1, serverAim[0] || 0));
+      const ay = Math.max(-1, Math.min(1, serverAim[1] || 0));
+      aimDot.style.transform = `translate(${(ax * 42).toFixed(1)}px, ${(-ay * 42).toFixed(1)}px)`;
+      aimPosePill.textContent = `MIRA: ${serverPose}`;
+
+      const localImpulse = Math.max(accum.peakRot * 1.15, accum.peakLin * 0.28, serverSpeed);
+      const briskPct = Math.min(100, Math.round((localImpulse / 4.2) * 100));
+      briskFill.style.width = `${briskPct}%`;
+      const isFlashing = performance.now() < hitFlashUntil;
+      aimPad.classList.toggle("hit-flash", isFlashing);
+      briskLabelVal.textContent = isFlashing ? "¡GOLPE!" : `${briskPct}%`;
+
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
       const hasSamples = accum.samples > 0 && accum.dt > 0.0005;
@@ -832,6 +903,7 @@
       const avgGy = hasSamples ? accum.dy / sendDt : latest.gy;
       const avgGz = hasSamples ? accum.dz / sendDt : latest.gz;
 
+      const dodgeMask = dodgePulse ? (dodgeDir > 0 ? 32 : 8) : 0;
       const payload = {
         s: slot,
         q: ++seqCounter,
@@ -849,11 +921,13 @@
           Number((hasSamples && accum.peakLin > 0.5 ? accum.plz : latest.lz).toFixed(3))
         ],
         hl: latest.hasLinear ? 1 : 0,
-        m: [Number(moveVec.x.toFixed(2)), Number(moveVec.y.toFixed(2))],
-        b: (guardPressed ? 1 : 0) | (recenterPulse ? 4 : 0) | (dodgePulse ? 8 : 0) | (thrustPulse ? 16 : 0)
+        d: dodgePulse ? dodgeDir : 0,
+        m: [0, 0],
+        b: (guardPressed ? 1 : 0) | (recenterPulse ? 4 : 0) | dodgeMask | (thrustPulse ? 16 : 0)
       };
       recenterPulse = false;
       dodgePulse = false;
+      dodgeDir = 0;
       thrustPulse = false;
 
       accum.dx = 0; accum.dy = 0; accum.dz = 0; accum.dt = 0; accum.samples = 0;
@@ -863,7 +937,7 @@
       ws.send(JSON.stringify(payload));
       const hzTxt = accum.hz > 0 ? `Sensor ${accum.hz}Hz` : "⚠️ Sin eventos IMU";
       telemetryEl.textContent =
-        `J${slot + 1} | ${hzTxt} | Hoja ${deg.toFixed(0)}° | ${guardPressed ? "GUARDIA" : "Libre"}`;
+        `J${slot + 1} | ${hzTxt} | ${serverPose} | Hoja ${deg.toFixed(0)}° | ${guardPressed ? "GUARDIA" : "Listo"}`;
     }, 16);
   </script>
 </body>

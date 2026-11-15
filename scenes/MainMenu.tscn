@@ -178,7 +178,7 @@ theme_override_colors/font_color = Color(0.95, 0.98, 1, 1)
 theme_override_colors/font_outline_color = Color(0.04, 0.1, 0.22, 0.85)
 theme_override_constants/outline_size = 4
 theme_override_font_sizes/font_size = 14
-text = "Tip móvil: acepta el aviso de certificado local al entrar por HTTPS para habilitar el giroscopio. Mueve WASD/stick para desplazarte en 3D por el ring."
+text = "Tip móvil: acepta el aviso de certificado local por HTTPS. Duelo estilo Switch: apunta 3D (frente/arriba/lados), golpea brusco y esquiva con A/D o botones ◀ ▶."
 
 [connection signal="pressed" from="UI/Margin/Root/MobileCard/HBox/CopyBtn" to="." method="_on_copy_url_pressed"]
 [connection signal="pressed" from="UI/Margin/Root/MobileCard/HBox/RefreshBtn" to="." method="_on_btn_refresh_pressed"]

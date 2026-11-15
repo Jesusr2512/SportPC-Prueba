@@ -136,9 +136,12 @@ func _process(delta: float) -> void:
 		_preview_f1.blade_orientation = s1.fusion.orientation
 		_preview_f1.blade_roll_rad = s1.fusion.get_snapped_blade_roll_rad()
 		_preview_f1.is_guarding = s1.is_guarding
-		if _preview_f1.state == AvatarFighter.State.NORMAL and s1.fusion.just_swung and s1.source_type != MotionHub.SourceType.MOUSE:
-			_preview_f1.trigger_slash(s1.fusion.last_slash_dir, s1.fusion.last_slash_power, s1.fusion.last_slash_type)
-		_preview_f1.step_fighter(delta, s1.move_axis, _preview_f2.position, true)
+		if _preview_f1.state == AvatarFighter.State.NORMAL:
+			if s1.just_dodge_pressed:
+				_preview_f1.trigger_dodge(s1.move_axis)
+			elif s1.fusion.just_swung and s1.source_type != MotionHub.SourceType.MOUSE:
+				_preview_f1.trigger_slash(s1.fusion.last_slash_dir, s1.fusion.last_slash_power, s1.fusion.last_slash_type)
+		_preview_f1.step_fighter(delta, Vector2.ZERO, _preview_f2.position, true)
 		var p1_xz := Vector2(_preview_f1.position.x, _preview_f1.position.z)
 		if p1_xz.length() > 2.2:
 			p1_xz = p1_xz.normalized() * 2.2
@@ -151,8 +154,9 @@ func _process(delta: float) -> void:
 
 	if s1.has_motion_sensors:
 		var guard_tag := " | BLOQUEO" if s1.is_guarding else ""
-		p1_label.text = "Jugador 1 (Azul):  %s  [6-Axis En Vivo: %.0f°%s]" % [
+		p1_label.text = "Jugador 1 (Azul):  %s  [%s | %.0f°%s]" % [
 			s1.device_name,
+			s1.fusion.get_aim_label(),
 			s1.fusion.get_blade_angle_deg(),
 			guard_tag
 		]

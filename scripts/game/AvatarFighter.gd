@@ -519,10 +519,9 @@ func trigger_dodge(dir_input: Vector2) -> bool:
 	if state == State.FALLING or state == State.STUNNED or dodge_cooldown_timer > 0.0:
 		return false
 	var lateral := Vector2(-facing_dir.y, facing_dir.x)
-	var fwd := facing_dir
 	var move_world: Vector2
-	if dir_input.length() > 0.15:
-		move_world = (lateral * dir_input.x + fwd * (-dir_input.y)).normalized()
+	if absf(dir_input.x) > 0.15:
+		move_world = lateral * signf(dir_input.x)
 	else:
 		move_world = lateral * _slash_start_side
 
@@ -664,14 +663,6 @@ func step_fighter(delta: float, move_input: Vector2, opponent_pos: Vector3, can_
 	var target_yaw := atan2(-facing_dir.y, facing_dir.x)
 	rotation.y = lerp_angle(rotation.y, target_yaw, clampf(delta * 15.0, 0.0, 1.0))
 
-	if can_act and state == State.NORMAL and move_input.length() > 0.05:
-		var fwd := Vector2(facing_dir.x, facing_dir.y).normalized()
-		var right := Vector2(-fwd.y, fwd.x)
-		var speed_mult := 1.15 if twin_blades_enabled else 1.0
-		var move_xz := (right * (move_input.x * 2.55) + fwd * (-move_input.y * 2.05)) * speed_mult
-		position.x += move_xz.x * delta
-		position.z += move_xz.y * delta
-
 	if hit_flash_timer > 0.0:
 		hit_flash_timer = maxf(0.0, hit_flash_timer - delta)
 		_body_mat.emission_enabled = true
@@ -775,7 +766,10 @@ func step_fighter(delta: float, move_input: Vector2, opponent_pos: Vector3, can_
 				state = State.NORMAL
 		State.NORMAL:
 			_telegraph_bar.visible = false
-			var e := blade_orientation.get_euler()
+			var q_map := Quaternion(Vector3.UP, -PI * 0.5)
+			var use_full_3d := not blade_orientation.is_equal_approx(Quaternion.IDENTITY)
+			var q_fighter := (q_map * blade_orientation * q_map.inverse()).normalized() if use_full_3d else Quaternion.from_euler(Vector3(blade_roll_rad, 0.0, 0.0))
+			var aim_f := q_fighter * Vector3.RIGHT
 			if effective_guard:
 				var parry_hot := guard_held_time <= 0.22
 				_sword_mat.emission = (Color(1.0, 0.92, 0.35) * 2.1) if parry_hot else (
@@ -783,25 +777,22 @@ func step_fighter(delta: float, move_input: Vector2, opponent_pos: Vector3, can_
 				)
 				if not twin_blades_enabled:
 					_hand_l.position = _hand_l.position.lerp(Vector3(0.0, 0.68, 0.0), delta * 20.0)
-				_upper_body.rotation = _upper_body.rotation.lerp(Vector3(clampf(e.x * 0.16, -0.18, 0.18), -0.10 + clampf(e.y * 0.22, -0.22, 0.22), -0.08), delta * 18.0)
-				_arm_pivot.position = _arm_pivot.position.lerp(Vector3(0.46 + clampf(-e.x * 0.08, -0.06, 0.10), 0.48 + clampf(e.x * 0.10, -0.08, 0.10), clampf(-e.y * 0.16, -0.14, 0.14)), delta * 20.0)
-				_blade_roll_pivot.rotation = _blade_roll_pivot.rotation.lerp(Vector3(blade_roll_rad, 0.0, 0.0), delta * 30.0)
-				_sword_tilt_pivot.rotation = _sword_tilt_pivot.rotation.lerp(
-					Vector3(0.0, clampf(e.y * 0.45, -0.45, 0.45), clampf(-0.04 + e.x * 0.35, -0.42, 0.38)),
-					delta * 22.0
-				)
+				_upper_body.rotation = _upper_body.rotation.lerp(Vector3(clampf(-aim_f.z * 0.16, -0.18, 0.18), -0.10 + clampf(-aim_f.z * 0.20, -0.22, 0.22), -0.06 + clampf(aim_f.y * 0.14, -0.16, 0.16)), delta * 18.0)
+				_arm_pivot.position = _arm_pivot.position.lerp(Vector3(0.46, 0.48 + clampf(aim_f.y * 0.12, -0.10, 0.14), clampf(aim_f.z * 0.16, -0.14, 0.14)), delta * 20.0)
+				var q_guard_yaw := Quaternion(Vector3.UP, clampf(-aim_f.z * 0.36, -0.36, 0.36))
+				var q_guard_pitch := Quaternion(Vector3.BACK, clampf(aim_f.y * 0.28, -0.28, 0.28))
+				var q_guard := (q_guard_yaw * q_guard_pitch * Quaternion(Vector3.RIGHT, blade_roll_rad)).normalized()
+				_blade_roll_pivot.quaternion = _blade_roll_pivot.quaternion.slerp(q_guard, clampf(delta * 28.0, 0.0, 1.0))
+				_sword_tilt_pivot.rotation = _sword_tilt_pivot.rotation.lerp(Vector3(0.0, 0.0, -0.18), delta * 22.0)
 				if twin_blades_enabled and _offhand_pivot:
 					_offhand_blade_root.rotation = _offhand_blade_root.rotation.lerp(Vector3(0.3, 0.65, -0.25), delta * 18.0)
 			else:
 				_sword_mat.emission = (Color(0.35, 1.0, 0.65) * 1.25) if (auto_guard_ready and not is_charged and not spirit_ready) else base_sword_emission
 				_hand_l.position = _hand_l.position.lerp(Vector3(-0.02, -0.03, -0.02), delta * 18.0)
-				_upper_body.rotation = _upper_body.rotation.lerp(Vector3(clampf(e.x * 0.18, -0.22, 0.22), clampf(e.y * 0.28, -0.28, 0.28), 0.0), delta * 14.0)
-				_arm_pivot.position = _arm_pivot.position.lerp(Vector3(0.38 + clampf(-e.x * 0.10, -0.08, 0.12), 0.42 + clampf(e.x * 0.12, -0.10, 0.12), 0.05 + clampf(-e.y * 0.20, -0.18, 0.18)), delta * 18.0)
-				_blade_roll_pivot.rotation = _blade_roll_pivot.rotation.lerp(Vector3(blade_roll_rad, 0.0, 0.0), delta * 32.0)
-				_sword_tilt_pivot.rotation = _sword_tilt_pivot.rotation.lerp(
-					Vector3(0.0, clampf(e.y * 0.72, -0.72, 0.72), clampf(-0.36 + e.x * 0.55, -1.15, 0.48)),
-					delta * 22.0
-				)
+				_upper_body.rotation = _upper_body.rotation.lerp(Vector3(clampf(-aim_f.z * 0.16, -0.22, 0.22), clampf(-aim_f.z * 0.30, -0.34, 0.34), clampf(aim_f.y * 0.18, -0.20, 0.22)), delta * 16.0)
+				_arm_pivot.position = _arm_pivot.position.lerp(Vector3(0.38, 0.42 + clampf(aim_f.y * 0.20, -0.16, 0.24), 0.05 + clampf(aim_f.z * 0.24, -0.22, 0.22)), delta * 20.0)
+				_blade_roll_pivot.quaternion = _blade_roll_pivot.quaternion.slerp(q_fighter, clampf(delta * 30.0, 0.0, 1.0))
+				_sword_tilt_pivot.rotation = _sword_tilt_pivot.rotation.lerp(Vector3(0.0, 0.0, -1.04), delta * 24.0)
 				if twin_blades_enabled and _offhand_pivot:
 					_offhand_blade_root.rotation = _offhand_blade_root.rotation.lerp(Vector3(-0.28, -0.15, -0.56), delta * 16.0)
 

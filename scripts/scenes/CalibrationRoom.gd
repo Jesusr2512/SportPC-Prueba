@@ -294,9 +294,10 @@ func _process(delta: float) -> void:
 
 
 func _animate_coach(delta: float) -> void:
+	var step_duration := 4.5 if _active_step == 0 else 3.8
 	if _demo_mode == DemoMode.AUTO:
 		_auto_timer += delta
-		if _auto_timer >= 3.8:
+		if _auto_timer >= step_duration:
 			_auto_timer = 0.0
 			_active_step = (_active_step + 1) % 4
 			_step_t = 0.0
@@ -316,11 +317,28 @@ func _animate_coach(delta: float) -> void:
 	var target_pitch := -0.68
 	var target_z_offset := 0.0
 	var guarding := false
+	var coach_pose_q := Quaternion.IDENTITY
+	var coach_pose_name := "AL FRENTE 🎯"
 
 	match _active_step:
 		0:
-			target_roll = 0.0
-			target_pitch = -0.68 + sin(_step_t * 2.5) * 0.03
+			var t_pose := fmod(_step_t, 4.5)
+			if t_pose < 0.9:
+				coach_pose_q = Quaternion.IDENTITY
+				coach_pose_name = "AL FRENTE 🎯"
+			elif t_pose < 1.8:
+				coach_pose_q = Quaternion(Vector3.RIGHT, 0.92)
+				coach_pose_name = "ARRIBA ↑"
+			elif t_pose < 2.7:
+				coach_pose_q = Quaternion(Vector3.RIGHT, -0.78)
+				coach_pose_name = "ABAJO ↓"
+			elif t_pose < 3.6:
+				coach_pose_q = Quaternion(Vector3.UP, 0.85)
+				coach_pose_name = "IZQUIERDA ⬅"
+			else:
+				coach_pose_q = Quaternion(Vector3.UP, -0.85)
+				coach_pose_name = "DERECHA ➡"
+			instruction_label.text = "PASO 1 — POSTURAS 3D [Mostrando: %s]: Mueve el móvil en todas direcciones 1:1 y pulsa 🎯 CENTRAR." % coach_pose_name
 		1:
 			var poses := [0.0, PI * 0.25, PI * 0.5, -PI * 0.25]
 			var idx := int(floor(_step_t / 0.85)) % poses.size()
@@ -380,14 +398,25 @@ func _animate_coach(delta: float) -> void:
 				else:
 					target_pitch = -0.68
 
-	_coach_phone_tilt.rotation.x = lerpf(_coach_phone_tilt.rotation.x, target_pitch, clampf(delta * 18.0, 0.0, 1.0))
-	_coach_phone_tilt.position.z = lerpf(_coach_phone_tilt.position.z, target_z_offset, clampf(delta * 18.0, 0.0, 1.0))
-	_coach_phone_roll.rotation.z = lerp_angle(_coach_phone_roll.rotation.z, -target_roll, clampf(delta * 14.0, 0.0, 1.0))
+	if _active_step == 0:
+		_coach_phone_tilt.quaternion = _coach_phone_tilt.quaternion.slerp(
+			coach_pose_q * Quaternion(Vector3.RIGHT, -1.04),
+			clampf(delta * 10.0, 0.0, 1.0)
+		)
+		_coach_phone_tilt.position.z = lerpf(_coach_phone_tilt.position.z, 0.0, clampf(delta * 18.0, 0.0, 1.0))
+		_coach_phone_roll.rotation = _coach_phone_roll.rotation.lerp(Vector3.ZERO, clampf(delta * 14.0, 0.0, 1.0))
+	else:
+		_coach_phone_tilt.rotation = _coach_phone_tilt.rotation.lerp(Vector3(target_pitch, 0.0, 0.0), clampf(delta * 18.0, 0.0, 1.0))
+		_coach_phone_tilt.position.z = lerpf(_coach_phone_tilt.position.z, target_z_offset, clampf(delta * 18.0, 0.0, 1.0))
+		_coach_phone_roll.rotation.z = lerp_angle(_coach_phone_roll.rotation.z, -target_roll, clampf(delta * 14.0, 0.0, 1.0))
 
 	_coach_avatar.is_guarding = guarding
 	if _coach_avatar.state == AvatarFighter.State.NORMAL:
 		_coach_avatar.blade_roll_rad = target_roll
-		_coach_avatar.blade_orientation = Quaternion.from_euler(Vector3(target_pitch + 0.68, 0.0, -target_roll))
+		if _active_step == 0:
+			_coach_avatar.blade_orientation = _coach_avatar.blade_orientation.slerp(coach_pose_q, clampf(delta * 10.0, 0.0, 1.0))
+		else:
+			_coach_avatar.blade_orientation = Quaternion.from_euler(Vector3(target_pitch + 0.68, 0.0, -target_roll))
 	_coach_avatar.step_fighter(delta, Vector2.ZERO, Vector3(-0.3, 0.0, -4.0), true)
 
 
@@ -416,20 +445,23 @@ func _update_live_player(delta: float) -> void:
 				MotionHub.trigger_rumble(0, 0.5, 0.09)
 
 		var target_dummy_pos := _dummy_avatar.position if _dummy_avatar else Vector3(0.9, 0.0, -2.0)
-		_live_avatar.step_fighter(delta, s0.move_axis * 0.4, target_dummy_pos, true)
-		_live_avatar.position = _live_avatar.position.lerp(Vector3(1.25, 0.0, -0.20), clampf(delta * 4.5, 0.0, 1.0))
+		_live_avatar.step_fighter(delta, Vector2.ZERO, target_dummy_pos, true)
+		if _live_avatar.state == AvatarFighter.State.NORMAL:
+			_live_avatar.position = _live_avatar.position.lerp(Vector3(1.25, 0.0, -0.20), clampf(delta * 4.5, 0.0, 1.0))
 
 	if _live_phone_roll and _live_phone_tilt:
-		var roll_s := s0.fusion.get_snapped_blade_roll_rad()
-		_live_phone_tilt.rotation.x = lerpf(_live_phone_tilt.rotation.x, -0.68 + clampf(s0.fusion.pitch_rad * 0.85, -0.95, 0.75), clampf(delta * 18.0, 0.0, 1.0))
-		_live_phone_tilt.rotation.y = lerpf(_live_phone_tilt.rotation.y, clampf(s0.fusion.yaw_rad * 0.7, -0.7, 0.7), clampf(delta * 16.0, 0.0, 1.0))
-		_live_phone_roll.rotation.z = lerp_angle(_live_phone_roll.rotation.z, -roll_s, clampf(delta * 20.0, 0.0, 1.0))
+		_live_phone_tilt.quaternion = _live_phone_tilt.quaternion.slerp(
+			s0.fusion.orientation * Quaternion(Vector3.RIGHT, -1.04),
+			clampf(delta * 20.0, 0.0, 1.0)
+		)
+		_live_phone_roll.rotation = Vector3.ZERO
 		_live_thumb_dot.visible = s0.is_guarding
 
 	_swing_flash_timer = maxf(0.0, _swing_flash_timer - delta)
 	var pct := clampf((s0.fusion.motion_energy / MotionFusion.SWING_THRESHOLD) * 100.0, 0.0, 140.0)
 	energy_bar.value = maxf(pct, 108.0 if _swing_flash_timer > 0.95 else 0.0)
 
+	var pose_now := s0.fusion.get_aim_label()
 	var fill_sb := energy_bar.get_theme_stylebox("fill") as StyleBoxFlat
 	if _swing_flash_timer > 0.0:
 		if fill_sb:
@@ -443,15 +475,16 @@ func _update_live_player(delta: float) -> void:
 			fill_sb.bg_color = Color(0.12, 0.84, 0.96, 1.0)
 		if _live_screen_mat:
 			_live_screen_mat.emission = Color(0.08, 0.80, 0.98) * 0.42
-		swing_badge.text = "Vel. Punta: %.0f%% (Muñeco hits: %d)" % [pct, _dummy_hits]
+		swing_badge.text = "Posición: %s | Impulso Brusco: %.0f%% (Hits: %d)" % [pose_now, pct, _dummy_hits]
 		swing_badge.add_theme_color_override("font_color", Color(0.75, 0.92, 1.0))
 
-	p1_stats.text = "J1 [%s] | Vel %.1f | Empuje %.1f m/s² | Hoja %.0f° | Guardia: %s" % [
+	p1_stats.text = "J1 [%s] | Mira: %s | Vel %.1f | Empuje %.1f | Hoja %.0f° | Guardia: %s" % [
 		s0.device_name,
+		pose_now,
 		s0.fusion.tip_speed,
-		s0.fusion.dynamic_accel_mag,
+		s0.fusion.forward_thrust_accel,
 		s0.fusion.get_blade_angle_deg(),
-		"ACTIVA" if s0.is_guarding else "Libre"
+		"ACTIVA" if s0.is_guarding else "Listo"
 	]
 
 	var s1: MotionHub.PlayerSlot = MotionHub.slots[1]
@@ -547,10 +580,10 @@ func _describe_slash_dir(d: Vector2) -> String:
 
 func _refresh_step_ui() -> void:
 	var captions := [
-		"PASO 1 — POSTURA BASE: Sujeta el móvil a ~45° apuntando a la pantalla como empuñadura y pulsa 🎯 CENTRAR.",
+		"PASO 1 — POSTURAS 3D: Apunta Al Frente, Arriba, Abajo o Lados; tu muñeco sigue el móvil 1:1. Pulsa 🎯 CENTRAR.",
 		"PASO 2 — GIRAR LA HOJA: Gira SOLO la muñeca (el eje de la hoja no dispara falsos golpes) y alinea contra el Muñeco Dojo.",
-		"PASO 3 — VELOCIDAD REAL: Arma hacia atrás o da un látigo rápido de muñeca/brazo (o ⚡ Estocada) para golpear al Muñeco Dojo.",
-		"PASO 4 — GUARDIA Y PARRY: Pulsa GUARDIA justo al impacto (<0.22s) para Parry Dorado, o Esquiva (Espacio / ◀ ▶)."
+		"PASO 3 — GOLPE BRUSCO: Apunta con calma; haz un movimiento brusco de muñeca o brazo (o ⚡ Estocada) para atacar.",
+		"PASO 4 — GUARDIA Y ESQUIVA: Pulsa GUARDIA al impacto (<0.22s) = Parry Dorado, o Esquiva lateral (◀ / ▶ o A / D)."
 	]
 	instruction_label.text = captions[_active_step]
 

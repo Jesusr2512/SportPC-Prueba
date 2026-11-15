@@ -33,6 +33,7 @@ class PlayerSlot:
 	var _prev_recenter: bool = false
 	var _prev_dodge: bool = false
 	var _prev_thrust: bool = false
+	var _joy_flick_latch: bool = false
 
 	func clear_edge_states() -> void:
 		_prev_guard = false
@@ -304,6 +305,10 @@ func _push_mobile_hud_feedback() -> void:
 		if s.source_type == SourceType.MOBILE and s.device_id >= 0 and mobile_server:
 			mobile_server.send_feedback(s.device_id, {
 				"roll": snappedf(s.fusion.get_blade_angle_deg(), 0.5),
+				"aim": [snappedf(s.fusion.aim_dir.x, 0.01), snappedf(s.fusion.aim_dir.y, 0.01)],
+				"pose": s.fusion.get_aim_label(),
+				"spd": snappedf(s.fusion.tip_speed, 0.1),
+				"hit": 1 if s.buffered_strike_timer > 0.0 else 0,
 				"guard": int(roundf(s.hud_guard_meter)),
 				"spirit": int(roundf(s.hud_spirit))
 			})
@@ -323,7 +328,14 @@ func _update_gamepad_slot(s: PlayerSlot, delta: float) -> void:
 		or Input.get_joy_axis(id, JOY_AXIS_TRIGGER_RIGHT) > 0.35
 	)
 	var strike := Input.is_joy_button_pressed(id, JOY_BUTTON_A)
-	var dodge := Input.is_joy_button_pressed(id, JOY_BUTTON_X)
+	var stick_x := Input.get_joy_axis(id, JOY_AXIS_LEFT_X)
+	if absf(stick_x) < 0.30:
+		s._joy_flick_latch = false
+	var stick_flick_dodge := false
+	if not s._joy_flick_latch and absf(stick_x) >= 0.65:
+		stick_flick_dodge = true
+		s._joy_flick_latch = true
+	var dodge := Input.is_joy_button_pressed(id, JOY_BUTTON_X) or stick_flick_dodge
 	var thrust := Input.is_joy_button_pressed(id, JOY_BUTTON_Y)
 	var recenter := (
 		Input.is_joy_button_pressed(id, JOY_BUTTON_START)
@@ -331,12 +343,8 @@ func _update_gamepad_slot(s: PlayerSlot, delta: float) -> void:
 		or Input.is_joy_button_pressed(id, JOY_BUTTON_MISC1)
 	)
 
-	s.move_axis = Vector2(
-		Input.get_joy_axis(id, JOY_AXIS_LEFT_X),
-		Input.get_joy_axis(id, JOY_AXIS_LEFT_Y)
-	)
-	if s.move_axis.length() < 0.15:
-		s.move_axis = Vector2.ZERO
+	# Switch Sports duel: lateral dodge direction only (zero free walking / stick drift!)
+	s.move_axis = Vector2(signf(stick_x) if absf(stick_x) >= 0.45 else 0.0, 0.0)
 
 	if s.has_motion_sensors:
 		var raw_g := Input.get_joy_gyroscope(id)
@@ -375,14 +383,15 @@ func _update_mobile_slot(s: PlayerSlot, delta: float) -> void:
 	if queue.is_empty():
 		var cached: Dictionary = _mobile_latest_state.get(s.device_id, {})
 		if cached.is_empty():
+			s.move_axis = Vector2.ZERO
 			s.begin_frame(false, false, false, false, false)
 			return
 		var btns_c := int(cached.get("b", 0))
-		var m_c: Array = cached.get("m", [0.0, 0.0])
-		if m_c.size() >= 2:
-			s.move_axis = Vector2(float(m_c[0]), float(m_c[1])).limit_length(1.0)
+		var dodge_c := ((btns_c & 8) != 0) or ((btns_c & 32) != 0)
+		var d_c := float(cached.get("d", 1.0 if (btns_c & 32) != 0 else (-1.0 if (btns_c & 8) != 0 else 0.0)))
+		s.move_axis = Vector2(clampf(d_c, -1.0, 1.0), 0.0) if dodge_c else Vector2.ZERO
 		s.fusion.just_swung = false
-		s.begin_frame((btns_c & 1) != 0, (btns_c & 2) != 0, (btns_c & 4) != 0, (btns_c & 8) != 0, (btns_c & 16) != 0)
+		s.begin_frame((btns_c & 1) != 0, (btns_c & 2) != 0, (btns_c & 4) != 0, dodge_c, (btns_c & 16) != 0)
 		return
 
 	var any_swung := false
@@ -395,6 +404,7 @@ func _update_mobile_slot(s: PlayerSlot, delta: float) -> void:
 	var strike := false
 	var recenter := false
 	var dodge := false
+	var dodge_dir := 0.0
 	var thrust := false
 
 	for pkt in queue:
@@ -402,12 +412,24 @@ func _update_mobile_slot(s: PlayerSlot, delta: float) -> void:
 		guard = (btns & 1) != 0
 		strike = strike or ((btns & 2) != 0)
 		recenter = recenter or ((btns & 4) != 0)
-		dodge = dodge or ((btns & 8) != 0)
+		var pkt_dodge := ((btns & 8) != 0) or ((btns & 32) != 0)
+		if pkt_dodge:
+			dodge = true
+			if pkt.has("d"):
+				dodge_dir = float(pkt.get("d", 0.0))
+			elif (btns & 32) != 0:
+				dodge_dir = 1.0
+			else:
+				dodge_dir = -1.0
+		elif pkt.has("d") and absf(float(pkt.get("d", 0.0))) > 0.25:
+			dodge = true
+			dodge_dir = float(pkt.get("d", 0.0))
 		thrust = thrust or ((btns & 16) != 0)
 
-		var m_arr: Array = pkt.get("m", [0.0, 0.0])
-		if m_arr.size() >= 2:
-			s.move_axis = Vector2(float(m_arr[0]), float(m_arr[1])).limit_length(1.0)
+		if dodge_dir == 0.0:
+			var m_arr: Array = pkt.get("m", [0.0, 0.0])
+			if m_arr.size() >= 1 and dodge:
+				dodge_dir = clampf(float(m_arr[0]), -1.0, 1.0)
 
 		var pkt_dt := clampf(float(pkt.get("dt", delta)), 0.003, 0.08)
 		var g_arr: Array = pkt.get("g", [0.0, 0.0, 0.0])
@@ -420,8 +442,8 @@ func _update_mobile_slot(s: PlayerSlot, delta: float) -> void:
 		var raw_gyro := Vector3(float(g_arr[0]), float(g_arr[1]), float(g_arr[2]))
 		var peak_gyro := Vector3(float(pg_arr[0]), float(pg_arr[1]), float(pg_arr[2]))
 		var raw_accel := Vector3(-float(a_arr[0]), -float(a_arr[2]), float(a_arr[1]))
-		var raw_linear := Vector3(-float(l_arr[0]), -float(l_arr[2]), float(l_arr[1]))
-		var gravity_est := (raw_accel - raw_linear) if has_lin else Vector3.ZERO
+		var raw_linear := Vector3(float(l_arr[0]), float(l_arr[2]), -float(l_arr[1]))
+		var gravity_est := (raw_accel + raw_linear) if has_lin else Vector3.ZERO
 
 		s.fusion.update(pkt_dt, raw_gyro, raw_accel, gravity_est, peak_gyro)
 		if s.fusion.just_swung:
@@ -442,6 +464,7 @@ func _update_mobile_slot(s: PlayerSlot, delta: float) -> void:
 		s.fusion.last_slash_type = swung_type
 		s.fusion.last_swing_source = swung_source
 
+	s.move_axis = Vector2(clampf(dodge_dir, -1.0, 1.0), 0.0) if dodge else Vector2.ZERO
 	s.begin_frame(guard, strike, recenter, dodge, thrust)
 	_apply_manual_attack_buttons(s, thrust)
 
@@ -450,7 +473,9 @@ func _update_mouse_slot(s: PlayerSlot, delta: float) -> void:
 	var safe_dt := maxf(delta, 0.004)
 	var guard := Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
 	var strike := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and mouse_combat_enabled
-	var dodge := Input.is_key_pressed(KEY_SPACE) or Input.is_key_pressed(KEY_SHIFT)
+	var dodge_left := Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT)
+	var dodge_right := Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT)
+	var dodge := Input.is_key_pressed(KEY_SPACE) or Input.is_key_pressed(KEY_SHIFT) or dodge_left or dodge_right
 	var thrust := Input.is_key_pressed(KEY_F)
 	var recenter := Input.is_key_pressed(KEY_R) or Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE)
 
@@ -479,17 +504,12 @@ func _update_mouse_slot(s: PlayerSlot, delta: float) -> void:
 	var q := Quaternion.from_euler(Vector3(_mouse_pitch, _mouse_yaw, _mouse_roll))
 	s.fusion.apply_external_orientation(q, safe_dt, fake_gyro, Vector3.ZERO)
 
-	var mx := 0.0
-	var my := 0.0
-	if Input.is_key_pressed(KEY_D):
-		mx += 1.0
-	if Input.is_key_pressed(KEY_A):
-		mx -= 1.0
-	if Input.is_key_pressed(KEY_S):
-		my += 1.0
-	if Input.is_key_pressed(KEY_W):
-		my -= 1.0
-	s.move_axis = Vector2(mx, my).limit_length(1.0)
+	var dodge_dx := 0.0
+	if dodge_right:
+		dodge_dx += 1.0
+	if dodge_left:
+		dodge_dx -= 1.0
+	s.move_axis = Vector2(dodge_dx, 0.0)
 
 	s.begin_frame(guard, strike, recenter, dodge, thrust)
 	if mouse_combat_enabled:

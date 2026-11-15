@@ -4,12 +4,12 @@ extends RefCounted
 enum SlashType { CUT = 0, THRUST = 1 }
 
 const GYRO_DEADZONE := 0.04
-const SWING_THRESHOLD := 3.25
-const SWING_PRIMED_THRESHOLD := 2.55
-const COMBO_THRESHOLD := 2.85
+const SWING_THRESHOLD := 2.75
+const SWING_PRIMED_THRESHOLD := 2.20
+const COMBO_THRESHOLD := 2.45
 const SWING_REFRACTORY := 0.115
-const THRUST_ACCEL_THRESHOLD := 6.2
-const STEADY_THRESHOLD := 2.1
+const THRUST_ACCEL_THRESHOLD := 5.8
+const STEADY_THRESHOLD := 1.9
 
 var raw_orientation: Quaternion = Quaternion.IDENTITY
 var recenter_offset: Quaternion = Quaternion.IDENTITY
@@ -26,11 +26,14 @@ var yaw_rad: float = 0.0
 var roll_rad: float = 0.0
 var blade_roll_rad: float = 0.0
 var snapped_blade_roll_rad: float = 0.0
+var aim_dir: Vector2 = Vector2.ZERO
+var aim_forward: Vector3 = Vector3.FORWARD
 
 var angular_speed: float = 0.0
 var tip_vel: Vector2 = Vector2.ZERO
 var tip_speed: float = 0.0
 var dynamic_accel_mag: float = 0.0
+var forward_thrust_accel: float = 0.0
 var motion_energy: float = 0.0
 var is_steady: bool = true
 var has_centered_once: bool = false
@@ -70,11 +73,14 @@ func reset_pose() -> void:
 	roll_rad = 0.0
 	blade_roll_rad = 0.0
 	snapped_blade_roll_rad = 0.0
+	aim_dir = Vector2.ZERO
+	aim_forward = Vector3.FORWARD
 	_prev_accel = Vector3(0.0, -9.81, 0.0)
 	_lp_accel = Vector3.ZERO
 	tip_vel = Vector2.ZERO
 	tip_speed = 0.0
 	dynamic_accel_mag = 0.0
+	forward_thrust_accel = 0.0
 	motion_energy = 0.0
 	active_peak_speed = 0.0
 	_refract_timer = 0.0
@@ -101,6 +107,8 @@ func recenter() -> void:
 	roll_rad = 0.0
 	blade_roll_rad = 0.0
 	snapped_blade_roll_rad = 0.0
+	aim_dir = Vector2.ZERO
+	aim_forward = Vector3.FORWARD
 	has_centered_once = true
 	active_peak_speed = 0.0
 	swing_cooldown_timer = 0.0
@@ -135,10 +143,11 @@ func update(delta: float, raw_gyro: Vector3, raw_accel: Vector3, raw_gravity: Ve
 
 	accel = raw_accel
 	var has_valid_grav := raw_gravity.length() > 1.5
-	var raw_lin := (raw_accel - raw_gravity) if has_valid_grav else Vector3.ZERO
-	if has_valid_grav and raw_lin.length() < 16.0:
-		gravity = gravity.lerp(raw_gravity, 0.35) if gravity.length() > 1.5 else raw_gravity
+	var raw_lin := (raw_gravity - raw_accel) if has_valid_grav else Vector3.ZERO
+	if has_valid_grav:
 		linear_accel = raw_lin
+		if raw_lin.length() < 16.0:
+			gravity = gravity.lerp(raw_gravity, 0.35) if gravity.length() > 1.5 else raw_gravity
 	else:
 		linear_accel = Vector3.ZERO
 
@@ -168,14 +177,18 @@ func update(delta: float, raw_gyro: Vector3, raw_accel: Vector3, raw_gravity: Ve
 
 	orientation = (recenter_offset * raw_orientation).normalized()
 
-	# World-frame linear thrust estimation (rotation-invariant: pure wrist twists NEVER fake acceleration!)
+	# World-frame linear thrust & brisk-whip estimation (rotation-invariant: pure wrist twists NEVER fake acceleration!)
 	var dyn_accel := linear_accel.length()
+	var world_lin_est := orientation * linear_accel
 	if raw_accel.length() > 0.5:
 		var world_accel := orientation * raw_accel
 		if _lp_accel.length() < 0.5:
 			_lp_accel = world_accel
-		var hp_world := (world_accel - _lp_accel).length()
+		var hp_world_vec := -(world_accel - _lp_accel)
+		var hp_world := hp_world_vec.length()
 		var mag_dev := absf(raw_accel.length() - 9.81)
+		if world_lin_est.length() < hp_world * 0.75 and mag_dev >= 1.15:
+			world_lin_est = hp_world_vec
 		if dyn_accel < THRUST_ACCEL_THRESHOLD and mag_dev >= 1.15:
 			dyn_accel = maxf(dyn_accel, maxf(hp_world, mag_dev * 1.45))
 		var lp_alpha := 0.36 if (angular_speed < 0.45 and (world_accel - _prev_accel).length() < 0.8) else 0.14
@@ -198,27 +211,10 @@ func update(delta: float, raw_gyro: Vector3, raw_accel: Vector3, raw_gravity: Ve
 
 	_sync_derived_angles_from_orientation()
 
-	# Compute true 3D tip velocity from angular velocity cross blade tip vector!
-	# Pure wrist roll along blade spine produces ZERO tip velocity (0 false swings while turning guard!).
 	var eff_gyro := gyro
 	if peak_gyro.length() > angular_speed:
 		eff_gyro = peak_gyro - gyro_bias
-	var w_world := orientation * Vector3(eff_gyro.x, eff_gyro.y, -eff_gyro.z)
-	var tip_world := orientation * Vector3.FORWARD
-	var v_tip := w_world.cross(tip_world)
-	tip_vel = Vector2(v_tip.x, -v_tip.y)
-	tip_speed = tip_vel.length()
-
-	# Suppress false tip wobble when rapidly twisting forearm purely to set block angle
-	var roll_rate := absf(eff_gyro.z)
-	var eff_tip_speed := tip_speed
-	if roll_rate > 2.6:
-		eff_tip_speed /= (1.0 + (roll_rate - 2.6) * 0.28)
-	eff_tip_speed *= clampf(GameConfig.dual_sense_sensitivity, 0.65, 1.55)
-	dynamic_accel_mag *= clampf(GameConfig.dual_sense_sensitivity, 0.65, 1.55)
-
-	is_steady = eff_tip_speed < STEADY_THRESHOLD and dynamic_accel_mag < 3.5
-	_detect_swing_v2(delta, eff_tip_speed, tip_vel)
+	_compute_tip_and_detect(delta, eff_gyro, orientation * linear_accel if linear_accel.length() >= 0.4 else world_lin_est)
 
 
 func apply_external_orientation(target_q: Quaternion, delta: float, raw_gyro: Vector3, raw_linear: Vector3) -> void:
@@ -234,13 +230,50 @@ func apply_external_orientation(target_q: Quaternion, delta: float, raw_gyro: Ve
 	gyro = raw_gyro
 	linear_accel = raw_linear
 	angular_speed = raw_gyro.length()
-	var w_world := orientation * Vector3(gyro.x, gyro.y, -gyro.z)
-	var v_tip := w_world.cross(orientation * Vector3.FORWARD)
-	tip_vel = Vector2(v_tip.x, -v_tip.y)
-	tip_speed = tip_vel.length()
 	dynamic_accel_mag = raw_linear.length()
-	is_steady = tip_speed < STEADY_THRESHOLD
-	_detect_swing_v2(delta, tip_speed, tip_vel)
+	_compute_tip_and_detect(delta, gyro, orientation * linear_accel)
+
+
+func _compute_tip_and_detect(delta: float, eff_gyro: Vector3, world_lin_est: Vector3) -> void:
+	# Compute true 3D tip velocity from angular velocity cross blade tip vector!
+	# Pure wrist roll along blade spine produces ZERO tip velocity (0 false swings while turning guard!).
+	var w_world := orientation * Vector3(eff_gyro.x, eff_gyro.y, -eff_gyro.z)
+	var tip_world := orientation * Vector3.FORWARD
+	var v_tip := w_world.cross(tip_world)
+	var tip_speed_3d := v_tip.length()
+
+	# Project 3D tip sweep onto the duel plane, preserving chops/sweeps from UP, DOWN, LEFT, RIGHT holds
+	var proj_vel := Vector2(v_tip.x + v_tip.z * tip_world.x, -v_tip.y - v_tip.z * tip_world.y)
+
+	# Split world linear acceleration into forward blade stab vs orthogonal brisk arm whip
+	var along_blade := maxf(0.0, world_lin_est.dot(tip_world))
+	var fwd_push := maxf(0.0, -world_lin_est.z)
+	var lin_perp := world_lin_est - tip_world * world_lin_est.dot(tip_world)
+
+	var roll_rate := absf(eff_gyro.z)
+	var is_pure_roll := (roll_rate > 1.8) and (tip_speed_3d < roll_rate * 0.42) and (lin_perp.length() < 7.5)
+	var eff_tip_speed := tip_speed_3d * (0.55 if is_pure_roll else 1.0)
+	if not is_pure_roll:
+		var lin_cut_boost := maxf(0.0, lin_perp.length() - 5.2) * 0.34
+		if lin_cut_boost > 0.05:
+			eff_tip_speed += lin_cut_boost
+			var lin_proj := Vector2(lin_perp.x + lin_perp.z * tip_world.x, -lin_perp.y - lin_perp.z * tip_world.y)
+			if lin_proj.length() > 0.4:
+				proj_vel += lin_proj.normalized() * (lin_cut_boost * 1.45)
+
+	var sens := clampf(GameConfig.dual_sense_sensitivity, 0.65, 1.55)
+	eff_tip_speed *= sens
+	dynamic_accel_mag *= sens
+	forward_thrust_accel = maxf(along_blade, fwd_push * 0.9) * sens
+	if lin_perp.length() * sens > forward_thrust_accel * 1.35:
+		forward_thrust_accel *= 0.45
+
+	var dir2 := proj_vel.normalized() if proj_vel.length() > 0.02 else Vector2.ZERO
+	tip_vel = dir2 * tip_speed_3d
+	tip_speed = tip_speed_3d
+
+	is_steady = eff_tip_speed < STEADY_THRESHOLD and dynamic_accel_mag < 3.5
+	_detect_swing_v2(delta, eff_tip_speed, proj_vel)
 
 
 func _sync_derived_angles_from_orientation() -> void:
@@ -248,12 +281,33 @@ func _sync_derived_angles_from_orientation() -> void:
 	var up := orientation * Vector3.UP
 	var fwd := orientation * Vector3.FORWARD
 
+	aim_forward = fwd
+	aim_dir = Vector2(fwd.x, fwd.y)
 	pitch_rad = clampf(asin(clampf(fwd.y, -0.99, 0.99)), -1.45, 1.45)
 	yaw_rad = clampf(atan2(-fwd.x, maxf(-fwd.z, 0.15)), -1.45, 1.45)
 	if absf(right.y) > 0.04 or absf(up.y) > 0.04:
 		roll_rad = clampf(atan2(-right.y, up.y), -PI * 0.85, PI * 0.85)
 	blade_roll_rad = clampf(roll_rad, -PI * 0.65, PI * 0.65)
 	snapped_blade_roll_rad = blade_roll_rad
+
+
+func get_aim_label() -> String:
+	var fwd := aim_forward
+	if fwd.z > 0.45 and absf(fwd.x) < 0.55 and absf(fwd.y) < 0.55:
+		return "HACIA ATRAS"
+	if fwd.y >= 0.42:
+		if absf(fwd.x) >= 0.38:
+			return "ARRIBA-DER" if fwd.x > 0.0 else "ARRIBA-IZQ"
+		return "ARRIBA"
+	if fwd.y <= -0.42:
+		if absf(fwd.x) >= 0.38:
+			return "ABAJO-DER" if fwd.x > 0.0 else "ABAJO-IZQ"
+		return "ABAJO"
+	if fwd.x >= 0.38:
+		return "DERECHA"
+	if fwd.x <= -0.38:
+		return "IZQUIERDA"
+	return "AL FRENTE"
 
 
 func quantize_4_angles(angle_rad: float) -> float:
@@ -269,21 +323,21 @@ func quantize_4_angles(angle_rad: float) -> float:
 
 
 func _detect_swing_v2(delta: float, eff_tip_speed: float, raw_tip_vec: Vector2) -> void:
-	var thrust_energy := dynamic_accel_mag * 0.56
+	var thrust_energy := forward_thrust_accel * 0.58
 	motion_energy = maxf(eff_tip_speed, thrust_energy)
 
 	if eff_tip_speed > active_peak_speed:
 		active_peak_speed = eff_tip_speed
 
 	# Track quiet pullback/backswing so the real forward chop feels effortless and extra punchy
-	if _refract_timer <= 0.0 and eff_tip_speed > 1.2 and eff_tip_speed < SWING_THRESHOLD:
+	if _refract_timer <= 0.0 and eff_tip_speed > 1.05 and eff_tip_speed < SWING_THRESHOLD and raw_tip_vec.length() > 0.1:
 		_backswing_dir = raw_tip_vec.normalized()
 		_backswing_timer = 0.35
 
 	# Forward thrust trigger ("Empuje frontal / Estocada")
-	if dynamic_accel_mag < THRUST_ACCEL_THRESHOLD * 0.45:
+	if forward_thrust_accel < THRUST_ACCEL_THRESHOLD * 0.45:
 		_thrust_rearmed = true
-	if _refract_timer <= 0.0 and _thrust_rearmed and dynamic_accel_mag >= THRUST_ACCEL_THRESHOLD and eff_tip_speed < 2.8:
+	if _refract_timer <= 0.0 and _thrust_rearmed and forward_thrust_accel >= THRUST_ACCEL_THRESHOLD and eff_tip_speed < 3.05:
 		_thrust_rearmed = false
 		_refract_timer = SWING_REFRACTORY
 		swing_cooldown_timer = SWING_REFRACTORY
@@ -292,14 +346,14 @@ func _detect_swing_v2(delta: float, eff_tip_speed: float, raw_tip_vec: Vector2) 
 		var cut_ang := quantize_4_angles(blade_roll_rad) - PI * 0.5
 		last_slash_dir = Vector2(cos(cut_ang), sin(cut_ang)).normalized()
 		_last_strike_dir = last_slash_dir
-		last_slash_power = clampf(0.55 + (dynamic_accel_mag - THRUST_ACCEL_THRESHOLD) / 10.5, 0.55, 1.75)
+		last_slash_power = clampf(0.55 + (forward_thrust_accel - THRUST_ACCEL_THRESHOLD) / 9.5, 0.55, 1.75)
 		last_slash_type = SlashType.THRUST
 		last_swing_source = "Empuje frontal"
 		just_swung = true
 		active_peak_speed = eff_tip_speed
 		return
 
-	if eff_tip_speed < 1.35:
+	if eff_tip_speed < 1.25:
 		_same_dir_rearmed = true
 
 	if _refract_timer > 0.0:
@@ -313,7 +367,7 @@ func _detect_swing_v2(delta: float, eff_tip_speed: float, raw_tip_vec: Vector2) 
 
 	var is_primed_forward := (_backswing_timer > 0.0 and strike_dir.dot(_backswing_dir) < -0.25)
 	var threshold := COMBO_THRESHOLD if is_reverse_combo else (SWING_PRIMED_THRESHOLD if is_primed_forward else SWING_THRESHOLD)
-	var allowed := _same_dir_rearmed or (is_reverse_combo and _reversal_travel >= 0.22)
+	var allowed := _same_dir_rearmed or (is_reverse_combo and _reversal_travel >= 0.20)
 
 	if allowed and eff_tip_speed >= threshold:
 		_refract_timer = SWING_REFRACTORY
@@ -325,7 +379,7 @@ func _detect_swing_v2(delta: float, eff_tip_speed: float, raw_tip_vec: Vector2) 
 		last_slash_dir = strike_dir
 		_last_strike_dir = strike_dir
 		var bonus := 0.15 if is_primed_forward else 0.0
-		last_slash_power = clampf(0.45 + (eff_tip_speed - threshold) / 10.5 + bonus, 0.45, 1.85)
+		last_slash_power = clampf(0.45 + (eff_tip_speed - threshold) / 9.5 + bonus, 0.45, 1.85)
 		last_slash_type = SlashType.CUT
 		last_swing_source = "Combo" if is_reverse_combo else "Tajo 1:1"
 		active_peak_speed = eff_tip_speed
@@ -333,7 +387,7 @@ func _detect_swing_v2(delta: float, eff_tip_speed: float, raw_tip_vec: Vector2) 
 
 
 func compute_live_power_from_peak(peak_spd: float) -> float:
-	return clampf(0.45 + maxf(peak_spd - 2.6, 0.0) / 10.5, 0.45, 1.85)
+	return clampf(0.45 + maxf(peak_spd - 2.2, 0.0) / 9.5, 0.45, 1.85)
 
 
 func get_blade_roll_rad() -> float:

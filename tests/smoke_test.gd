@@ -350,5 +350,105 @@ func _run_checks() -> void:
 	if _failed: return
 	print("OK Chambara 2P Split-Screen + Puente Volcánico + Espadas Gemelas")
 
+	# Test J: 3D Poses (Frente, Arriba, Abajo, Izq, Der), Overhead Chop & Brisk Linear Whip
+	var f_up := MotionFusion.new()
+	f_up.reset_pose()
+	f_up.apply_external_orientation(Quaternion(Vector3.RIGHT, 1.05), 0.016, Vector3.ZERO, Vector3.ZERO)
+	_check(f_up.get_aim_label() == "ARRIBA", "Up pitch must report ARRIBA, got %s" % f_up.get_aim_label())
+	# Chop downward from vertical overhead hold (angular pitch -X)
+	f_up.apply_external_orientation(Quaternion(Vector3.RIGHT, 0.85), 0.016, Vector3(-4.2, 0.0, 0.0), Vector3.ZERO)
+	_check(f_up.just_swung and f_up.last_slash_type == MotionFusion.SlashType.CUT, "Downward chop from ARRIBA must trigger CUT")
+
+	var f_poses := MotionFusion.new()
+	f_poses.reset_pose()
+	_check(f_poses.get_aim_label() == "AL FRENTE", "Identity must report AL FRENTE")
+	f_poses.apply_external_orientation(Quaternion(Vector3.RIGHT, -0.95), 0.016, Vector3.ZERO, Vector3.ZERO)
+	_check(f_poses.get_aim_label() == "ABAJO", "Down pitch must report ABAJO, got %s" % f_poses.get_aim_label())
+	f_poses.apply_external_orientation(Quaternion(Vector3.UP, 0.90), 0.016, Vector3.ZERO, Vector3.ZERO)
+	_check(f_poses.get_aim_label() == "IZQUIERDA", "Left yaw must report IZQUIERDA, got %s" % f_poses.get_aim_label())
+	f_poses.apply_external_orientation(Quaternion(Vector3.UP, -0.90), 0.016, Vector3.ZERO, Vector3.ZERO)
+	_check(f_poses.get_aim_label() == "DERECHA", "Right yaw must report DERECHA, got %s" % f_poses.get_aim_label())
+
+	var f_brisk := MotionFusion.new()
+	f_brisk.reset_pose()
+	# Pure wrist roll should still stay 0 swings, while brisk lateral linear whip + slight wrist impulse triggers CUT
+	for k in 6:
+		var g_rot := f_brisk.orientation.inverse() * Vector3(0.0, -9.81, 0.0)
+		f_brisk.update(0.016, Vector3(0.0, 0.0, 5.0), g_rot, g_rot, Vector3(0.0, 0.0, 5.0))
+		_check(not f_brisk.just_swung, "Pure wrist twist must NEVER trigger false slash")
+	f_brisk.recenter()
+	f_brisk.update(0.016, Vector3(0.0, -1.2, 0.0), Vector3(-11.5, -9.81, 0.0), Vector3(0.0, -9.81, 0.0))
+	_check(f_brisk.just_swung and f_brisk.last_slash_type == MotionFusion.SlashType.CUT, "Brisk linear arm whip + impulse must trigger CUT cleanly")
+	if _failed: return
+	print("OK 3D Poses, Overhead Chop & Brisk Linear Whip")
+
+	# Test K: Zero Free-Walk / No Backward Drift + True 3D Sword Aim Tracking in Fighter
+	var arena_k = arena_scene.instantiate()
+	tree.root.add_child(arena_k)
+	await tree.process_frame
+	arena_k._complete_entry_calibration()
+	arena_k.f1.reset_for_round(Vector3(0.0, 0.0, 0.85), Vector2(0.0, -1.0))
+	arena_k.f2.reset_for_round(Vector3(0.0, 0.0, -0.85), Vector2(0.0, 1.0))
+	var start_z: float = arena_k.f1.position.z
+	for i in 12:
+		arena_k.f1.step_fighter(0.02, Vector2(0.0, 1.0), arena_k.f2.position, true)
+	_check(absf(arena_k.f1.position.z - start_z) < 0.001, "Fighter must NEVER walk backward from move_input (got z=%f vs %f)" % [arena_k.f1.position.z, start_z])
+
+	# Verify 3D blade tip responds to UP, DOWN, LEFT, RIGHT orientation without Euler clamp lock
+	arena_k.f1.blade_orientation = Quaternion(Vector3.RIGHT, 1.04)
+	for i in 18: arena_k.f1.step_fighter(0.02, Vector2.ZERO, arena_k.f2.position, true)
+	await tree.process_frame
+	var seg_up: Array[Vector3] = arena_k.f1.get_blade_segment_world()
+	var dir_up: Vector3 = (seg_up[1] - seg_up[0]).normalized()
+	_check(dir_up.y > 0.82, "3D ARRIBA pose must point sword high UP (dir_up.y=%f)" % dir_up.y)
+
+	arena_k.f1.blade_orientation = Quaternion(Vector3.RIGHT, -1.04)
+	for i in 18: arena_k.f1.step_fighter(0.02, Vector2.ZERO, arena_k.f2.position, true)
+	await tree.process_frame
+	var seg_dn: Array[Vector3] = arena_k.f1.get_blade_segment_world()
+	var dir_dn: Vector3 = (seg_dn[1] - seg_dn[0]).normalized()
+	_check(dir_dn.y < -0.45, "3D ABAJO pose must point sword DOWN (dir_dn.y=%f)" % dir_dn.y)
+
+	arena_k.f1.blade_orientation = Quaternion(Vector3.UP, 1.0)
+	for i in 18: arena_k.f1.step_fighter(0.02, Vector2.ZERO, arena_k.f2.position, true)
+	await tree.process_frame
+	var seg_lf: Array[Vector3] = arena_k.f1.get_blade_segment_world()
+	var dir_lf: Vector3 = (seg_lf[1] - seg_lf[0]).normalized()
+	_check(dir_lf.x < -0.50, "3D IZQUIERDA pose must aim blade toward -X world left (dir_lf.x=%f)" % dir_lf.x)
+
+	arena_k.f1.blade_orientation = Quaternion(Vector3.UP, -1.0)
+	for i in 18: arena_k.f1.step_fighter(0.02, Vector2.ZERO, arena_k.f2.position, true)
+	await tree.process_frame
+	var seg_rt: Array[Vector3] = arena_k.f1.get_blade_segment_world()
+	var dir_rt: Vector3 = (seg_rt[1] - seg_rt[0]).normalized()
+	_check(dir_rt.x > 0.50, "3D DERECHA pose must aim blade toward +X world right (dir_rt.x=%f)" % dir_rt.x)
+
+	arena_k.queue_free()
+	await tree.process_frame
+	if _failed: return
+	print("OK Zero Backward Walk & 3D Sword Aim Tracking (Up/Down/Left/Right)")
+
+	# Test L: End-to-end Android Chrome WebSocket payload -> MotionHub -> Fusion (Thrust / Dodge / Idle Zero Walk)
+	hub._on_mobile_telemetry(999, {"s": 0, "q": 1, "dt": 0.016, "g": [0.0, 0.0, 0.0], "pg": [0.0, 0.0, 0.0], "a": [0.0, 0.0, 9.81], "l": [0.0, 0.0, 0.0], "hl": 1, "d": 0, "m": [0.0, 0.0], "b": 4})
+	hub._process(0.016)
+	_check(hub.slots[0].source_type == MotionHub.SourceType.MOBILE, "Telemetry must bind mobile peer to Slot 0")
+	_check(hub.slots[0].move_axis == Vector2.ZERO, "Mobile idle must keep move_axis == ZERO")
+
+	# Simulated Android forward phone thrust (+Y_phone linear accel = +10.0)
+	hub._on_mobile_telemetry(999, {"s": 0, "q": 2, "dt": 0.016, "g": [0.0, 0.0, 0.0], "pg": [0.0, 0.0, 0.0], "a": [0.0, 10.0, 9.81], "l": [0.0, 10.0, 0.0], "hl": 1, "d": 0, "m": [0.0, 0.0], "b": 0})
+	hub._process(0.016)
+	_check(hub.slots[0].fusion.just_swung and hub.slots[0].fusion.last_slash_type == MotionFusion.SlashType.THRUST, "Android Chrome +Y forward accel must trigger THRUST, got %d" % hub.slots[0].fusion.last_slash_type)
+
+	# Simulated lateral sidestep dodge pulse Left (b=8, d=-1) then idle clear
+	hub._on_mobile_telemetry(999, {"s": 0, "q": 3, "dt": 0.016, "g": [0.0, 0.0, 0.0], "pg": [0.0, 0.0, 0.0], "a": [0.0, 0.0, 9.81], "l": [0.0, 0.0, 0.0], "hl": 1, "d": -1, "m": [0.0, 0.0], "b": 8})
+	hub._process(0.016)
+	_check(hub.slots[0].just_dodge_pressed and hub.slots[0].move_axis.x < -0.5, "Mobile dodgeLeft must trigger dodge with -X direction")
+	hub._on_mobile_telemetry(999, {"s": 0, "q": 4, "dt": 0.016, "g": [0.0, 0.0, 0.0], "pg": [0.0, 0.0, 0.0], "a": [0.0, 0.0, 9.81], "l": [0.0, 0.0, 0.0], "hl": 1, "d": 0, "m": [0.0, 0.0], "b": 0})
+	hub._process(0.016)
+	_check(hub.slots[0].move_axis == Vector2.ZERO, "Mobile move_axis must reset to ZERO immediately after dodge")
+	hub._on_mobile_disconnected(999)
+	if _failed: return
+	print("OK End-to-End Android Mobile Telemetry (Thrust / Lateral Dodge / Idle Zero Walk)")
+
 	print("ALL SMOKE TESTS PASSED SUCCESSFULLY!")
 	tree.quit(0)

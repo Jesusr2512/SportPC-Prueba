@@ -65,7 +65,7 @@ text = "🔁 Ver Todo (Auto)"
 [node name="BtnStep1" type="Button" parent="UI/HUD/CoachCard/VBox/StepButtons"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "1. Postura (45°)"
+text = "1. Posturas 3D"
 
 [node name="BtnStep2" type="Button" parent="UI/HUD/CoachCard/VBox/StepButtons"]
 layout_mode = 2
@@ -75,7 +75,7 @@ text = "2. Girar Hoja"
 [node name="BtnStep3" type="Button" parent="UI/HUD/CoachCard/VBox/StepButtons"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "3. Atacar (Corte)"
+text = "3. Golpe Brusco"
 
 [node name="BtnStep4" type="Button" parent="UI/HUD/CoachCard/VBox/StepButtons"]
 layout_mode = 2
