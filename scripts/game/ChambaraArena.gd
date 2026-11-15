@@ -1,28 +1,28 @@
-@tool
 extends Node3D
 
-const AVATAR_SCENE := preload("res://scenes/AvatarFighter.tscn")
-const ROUND_DURATION := 45.0
-const MAX_WINS := 2
-const CALIB_STEADY_REQUIRED := 0.45
-const DUEL_DISTANCE := 1.52
+const AvatarFighterScene := preload("res://scenes/AvatarFighter.tscn")
+const DojoStageScript := preload("res://scripts/game/DojoStage.gd")
 
-enum MatchPhase { CALIBRATE_ENTRY, INTRO, FIGHTING, ROUND_END, MATCH_OVER }
+enum MatchPhase { CALIBRATE_ENTRY, INTRO, FIGHTING, ROUND_OVER, MATCH_OVER }
 
+@onready var arena_visuals: Node3D = $ArenaVisuals
+@onready var world_env: WorldEnvironment = $WorldEnvironment
+@onready var sun_light: DirectionalLight3D = $DirectionalLight3D
 @onready var cam: Camera3D = $Camera3D
-@onready var arena_root: Node3D = $ArenaVisuals
-@onready var top_card: PanelContainer = $UI/HUD/TopCard
-@onready var bottom_card: PanelContainer = $UI/HUD/BottomCard
-@onready var banner_label: Label = $UI/HUD/BannerLabel
-@onready var score_p1_label: Label = $UI/HUD/TopCard/TopVBox/TopBar/ScoreP1
-@onready var score_p2_label: Label = $UI/HUD/TopCard/TopVBox/TopBar/ScoreP2
-@onready var timer_label: Label = $UI/HUD/TopCard/TopVBox/TopBar/TimerLabel
+@onready var ui_layer: CanvasLayer = $UI
+
+@onready var score_p1_lbl: Label = $UI/HUD/TopCard/TopVBox/TopBar/ScoreP1
+@onready var timer_lbl: Label = $UI/HUD/TopCard/TopVBox/TopBar/TimerLabel
+@onready var score_p2_lbl: Label = $UI/HUD/TopCard/TopVBox/TopBar/ScoreP2
 @onready var ring_bar: Control = $UI/HUD/TopCard/TopVBox/RingBalanceBar
+@onready var banner_lbl: Label = $UI/HUD/BannerLabel
 @onready var reticle_hud: Control = $UI/HUD/ReticleRow/ReticleHUD
-@onready var p1_status_label: Label = $UI/HUD/BottomCard/BottomInfo/StatusP1
-@onready var p2_status_label: Label = $UI/HUD/BottomCard/BottomInfo/StatusP2
+
+@onready var status_p1_lbl: Label = $UI/HUD/BottomCard/BottomInfo/StatusP1
+@onready var status_p2_lbl: Label = $UI/HUD/BottomCard/BottomInfo/StatusP2
 @onready var recenter_p2_btn: Button = $UI/HUD/BottomCard/BottomInfo/RecenterP2
 @onready var calib_panel: PanelContainer = $UI/CalibPanel
+@onready var calib_title: Label = $UI/CalibPanel/VBox/CalibTitle
 @onready var calib_desc: Label = $UI/CalibPanel/VBox/CalibDesc
 @onready var calib_progress: ProgressBar = $UI/CalibPanel/VBox/CalibProgress
 @onready var victory_panel: PanelContainer = $UI/VictoryPanel
@@ -32,885 +32,1090 @@ var f1: AvatarFighter
 var f2: AvatarFighter
 
 var phase: MatchPhase = MatchPhase.CALIBRATE_ENTRY
-var phase_timer: float = 1.25
-var round_timer: float = ROUND_DURATION
+var phase_timer: float = 0.0
+var round_time: float = 45.0
 var round_number: int = 1
-var wins_p1: int = 0
-var wins_p2: int = 0
-var sudden_death: bool = false
+var score_p1: int = 0
+var score_p2: int = 0
+
+var _hub: Node
+var _sfx: Node
+var _stage_refs: Dictionary = {}
+var _stage_type: int = GameConfig.ArenaStage.SUN_ISLAND
+var _sparks: Array[Dictionary] = []
+var _waves: Array[Dictionary] = []
+
+var _shake_timer: float = 0.0
+var _shake_strength: float = 0.0
+var _hitstop_timer: float = 0.0
+var _slowmo_timer: float = 0.0
+var _cam_fov_punch: float = 0.0
+var _shader_time: float = 0.0
 
 var _calib_steady_time: float = 0.0
-var _hitstop_timer: float = 0.0
-var _shake_amount: float = 0.0
-var _clash_flash: MeshInstance3D
-var _clash_timer: float = 0.0
-var _banner_timer: float = 0.0
-var _water_ring: MeshInstance3D
-var _fx_time: float = 0.0
-var _sparks: Array[Dictionary] = []
+var _calib_total_time: float = 0.0
+var _last_calib_pips: int = 0
+var script_ai_and_input_enabled: bool = true
 
 # AI state
-var _ai_think_timer: float = 0.4
-var _ai_guard_hold_timer: float = 0.0
+var _ai_timer: float = 0.85
 var _ai_target_roll: float = 0.0
+var _ai_move: Vector2 = Vector2.ZERO
+var _ai_strafe_timer: float = 0.0
+var _ai_guard_pressure: float = 0.0
+
+# Optional 2P split-screen rig
+var _split_root: HBoxContainer
+var _split_cam_p1: Camera3D
+var _split_cam_p2: Camera3D
 
 
 func _ready() -> void:
-	for ch in arena_root.get_children():
-		ch.free()
-	for ch in get_children():
-		if ch is AvatarFighter:
-			ch.free()
-	_build_arena_geometry()
-	_apply_ui_theme()
-	_spawn_fighters()
-	victory_panel.visible = false
-	calib_panel.visible = false
-	reticle_hud.visible = false
-	recenter_p2_btn.visible = (GameConfig.match_mode == "2p")
-	p2_status_label.visible = true
+	_hub = get_node_or_null("/root/MotionHub")
+	_sfx = get_node_or_null("/root/SoundFX")
+	if _hub != null:
+		_hub.mouse_combat_enabled = true
+	Engine.time_scale = 1.0
 
-	if Engine.is_editor_hint():
-		_place_fighters_at_spawn()
-		_update_camera(1.0)
-		return
+	_stage_type = GameConfig.arena_stage
+	_build_arena()
+	_spawn_fighters()
+	_setup_cameras()
+	_style_hud()
 
 	ring_bar.draw.connect(_on_draw_ring_bar)
 	reticle_hud.draw.connect(_on_draw_reticle)
-	MotionHub.recenter_slot(0)
-	if GameConfig.match_mode == "2p":
-		MotionHub.recenter_slot(1)
-	_start_round()
+
+	recenter_p2_btn.visible = (GameConfig.match_mode == "2p")
+	begin_entry_calibration(false)
 
 
-func _apply_ui_theme() -> void:
-	var hud_box := StyleBoxFlat.new()
-	hud_box.bg_color = Color(0.05, 0.11, 0.22, 0.80)
-	hud_box.border_color = Color(0.24, 0.68, 0.94, 0.42)
-	hud_box.set_border_width_all(2)
-	hud_box.set_corner_radius_all(14)
-	hud_box.set_content_margin_all(10)
-	top_card.add_theme_stylebox_override("panel", hud_box)
-	bottom_card.add_theme_stylebox_override("panel", hud_box)
-
-	var modal_box := StyleBoxFlat.new()
-	modal_box.bg_color = Color(0.06, 0.12, 0.24, 0.94)
-	modal_box.border_color = Color(0.32, 0.78, 1.0, 0.75)
-	modal_box.set_border_width_all(3)
-	modal_box.set_corner_radius_all(20)
-	modal_box.set_content_margin_all(24)
-	calib_panel.add_theme_stylebox_override("panel", modal_box)
-	victory_panel.add_theme_stylebox_override("panel", modal_box)
-
-	var bar_bg := StyleBoxFlat.new()
-	bar_bg.bg_color = Color(0.12, 0.18, 0.30, 0.9)
-	bar_bg.set_corner_radius_all(10)
-	var bar_fill := StyleBoxFlat.new()
-	bar_fill.bg_color = Color(0.14, 0.82, 0.94, 1.0)
-	bar_fill.set_corner_radius_all(10)
-	calib_progress.add_theme_stylebox_override("background", bar_bg)
-	calib_progress.add_theme_stylebox_override("fill", bar_fill)
+func _exit_tree() -> void:
+	Engine.time_scale = 1.0
+	if _hub != null:
+		_hub.mouse_combat_enabled = true
 
 
-func _build_arena_geometry() -> void:
-	# Ocean water plane
-	var water := MeshInstance3D.new()
-	var wm := PlaneMesh.new()
-	wm.size = Vector2(180.0, 180.0)
-	water.mesh = wm
-	var wmat := StandardMaterial3D.new()
-	wmat.albedo_color = Color(0.06, 0.56, 0.84)
-	wmat.roughness = 0.14
-	wmat.metallic = 0.1
-	water.material_override = wmat
-	water.position = Vector3(0.0, -1.45, 0.0)
-	arena_root.add_child(water)
-
-	# Animated water ripple ring around platform
-	_water_ring = MeshInstance3D.new()
-	var wrm := TorusMesh.new()
-	wrm.inner_radius = AvatarFighter.PLATFORM_RADIUS + 0.15
-	wrm.outer_radius = AvatarFighter.PLATFORM_RADIUS + 0.45
-	wrm.rings = 48
-	_water_ring.mesh = wrm
-	var wrmat := StandardMaterial3D.new()
-	wrmat.albedo_color = Color(0.75, 0.96, 1.0, 0.42)
-	wrmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_water_ring.material_override = wrmat
-	_water_ring.rotation_degrees = Vector3(90, 0, 0)
-	_water_ring.scale = Vector3(1.0, 1.0, 0.12)
-	_water_ring.position = Vector3(0.0, -1.42, 0.0)
-	arena_root.add_child(_water_ring)
-
-	# Stone base beneath wooden deck
-	var base := MeshInstance3D.new()
-	var bm := CylinderMesh.new()
-	bm.top_radius = AvatarFighter.PLATFORM_RADIUS + 0.12
-	bm.bottom_radius = AvatarFighter.PLATFORM_RADIUS * 0.86
-	bm.height = 1.45
-	bm.radial_segments = 48
-	base.mesh = bm
-	var bmat := StandardMaterial3D.new()
-	bmat.albedo_color = Color(0.32, 0.36, 0.44)
-	bmat.roughness = 0.85
-	base.material_override = bmat
-	base.position = Vector3(0.0, -0.78, 0.0)
-	arena_root.add_child(base)
-
-	# Warm wooden dojo top deck
-	var plat := MeshInstance3D.new()
-	var pm := CylinderMesh.new()
-	pm.top_radius = AvatarFighter.PLATFORM_RADIUS
-	pm.bottom_radius = AvatarFighter.PLATFORM_RADIUS
-	pm.height = 0.14
-	pm.radial_segments = 48
-	plat.mesh = pm
-	var pmat := StandardMaterial3D.new()
-	pmat.albedo_color = Color(0.89, 0.78, 0.60)
-	pmat.roughness = 0.55
-	plat.material_override = pmat
-	plat.position = Vector3(0.0, -0.07, 0.0)
-	arena_root.add_child(plat)
-
-	# Outer warning rim
-	var rim := MeshInstance3D.new()
-	var rm := TorusMesh.new()
-	rm.inner_radius = AvatarFighter.PLATFORM_RADIUS - 0.35
-	rm.outer_radius = AvatarFighter.PLATFORM_RADIUS
-	rm.rings = 48
-	rim.mesh = rm
-	var rmat := StandardMaterial3D.new()
-	rmat.albedo_color = Color(0.96, 0.40, 0.25)
-	rmat.emission_enabled = true
-	rmat.emission = Color(0.96, 0.35, 0.2) * 0.25
-	rim.material_override = rmat
-	rim.rotation_degrees = Vector3(90, 0, 0)
-	rim.scale = Vector3(1.0, 1.0, 0.18)
-	rim.position = Vector3(0.0, 0.01, 0.0)
-	arena_root.add_child(rim)
-
-	# Inner center ring
-	var center_ring := MeshInstance3D.new()
-	var cm := TorusMesh.new()
-	cm.inner_radius = 1.65
-	cm.outer_radius = 1.78
-	cm.rings = 48
-	center_ring.mesh = cm
-	var cmat := StandardMaterial3D.new()
-	cmat.albedo_color = Color(0.12, 0.74, 0.92)
-	cmat.emission_enabled = true
-	cmat.emission = Color(0.12, 0.74, 0.92) * 0.3
-	center_ring.material_override = cmat
-	center_ring.rotation_degrees = Vector3(90, 0, 0)
-	center_ring.scale = Vector3(1.0, 1.0, 0.15)
-	center_ring.position = Vector3(0.0, 0.015, 0.0)
-	arena_root.add_child(center_ring)
-
-	# 4 Decorative perimeter lanterns outside ring
-	var pillar_mat := StandardMaterial3D.new()
-	pillar_mat.albedo_color = Color(0.24, 0.28, 0.36)
-	var lantern_mat := StandardMaterial3D.new()
-	lantern_mat.albedo_color = Color(1.0, 0.9, 0.55)
-	lantern_mat.emission_enabled = true
-	lantern_mat.emission = Color(1.0, 0.82, 0.35) * 1.4
-
-	for k in 4:
-		var ang := PI * 0.25 + k * PI * 0.5
-		var dist := AvatarFighter.PLATFORM_RADIUS + 1.05
-		var px := cos(ang) * dist
-		var pz := sin(ang) * dist
-		var post := MeshInstance3D.new()
-		var post_m := CylinderMesh.new()
-		post_m.top_radius = 0.16
-		post_m.bottom_radius = 0.22
-		post_m.height = 2.4
-		post.mesh = post_m
-		post.material_override = pillar_mat
-		post.position = Vector3(px, -0.35, pz)
-		arena_root.add_child(post)
-
-		var lamp := MeshInstance3D.new()
-		var lm := BoxMesh.new()
-		lm.size = Vector3(0.32, 0.38, 0.32)
-		lamp.mesh = lm
-		lamp.material_override = lantern_mat
-		lamp.position = Vector3(px, 1.0, pz)
-		arena_root.add_child(lamp)
-
-	# Distant tropical island silhouettes
-	var island_mat := StandardMaterial3D.new()
-	island_mat.albedo_color = Color(0.24, 0.52, 0.44)
-	for info in [
-		[Vector3(-18.0, -1.0, -28.0), Vector3(11.0, 4.5, 9.0)],
-		[Vector3(22.0, -1.1, -34.0), Vector3(14.0, 6.0, 12.0)],
-		[Vector3(2.0, -1.2, -45.0), Vector3(20.0, 7.5, 10.0)]
-	]:
-		var isl := MeshInstance3D.new()
-		var im := SphereMesh.new()
-		im.radius = 1.0
-		im.height = 1.4
-		isl.mesh = im
-		isl.material_override = island_mat
-		isl.position = info[0]
-		isl.scale = info[1]
-		arena_root.add_child(isl)
-
-	# Clash spark burst mesh
-	_clash_flash = MeshInstance3D.new()
-	var fm := SphereMesh.new()
-	fm.radius = 0.42
-	fm.height = 0.84
-	_clash_flash.mesh = fm
-	var fmat := StandardMaterial3D.new()
-	fmat.albedo_color = Color(1.0, 0.94, 0.35, 0.85)
-	fmat.emission_enabled = true
-	fmat.emission = Color(1.0, 0.88, 0.25) * 1.8
-	fmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_clash_flash.material_override = fmat
-	_clash_flash.visible = false
-	arena_root.add_child(_clash_flash)
+func _build_arena() -> void:
+	_stage_refs = DojoStageScript.build_stage(arena_visuals, _stage_type)
+	if world_env and world_env.environment:
+		var env := world_env.environment
+		if env.sky and env.sky.sky_material is ProceduralSkyMaterial:
+			var sky_mat: ProceduralSkyMaterial = env.sky.sky_material
+			match _stage_type:
+				GameConfig.ArenaStage.VOLCANIC_BRIDGE:
+					sky_mat.sky_top_color = Color(0.18, 0.05, 0.04)
+					sky_mat.sky_horizon_color = Color(0.75, 0.28, 0.12)
+					env.ambient_light_color = Color(1.0, 0.68, 0.52)
+					if sun_light:
+						sun_light.light_color = Color(1.0, 0.78, 0.58)
+				GameConfig.ArenaStage.SKY_SANCTUARY:
+					sky_mat.sky_top_color = Color(0.08, 0.38, 0.88)
+					sky_mat.sky_horizon_color = Color(0.84, 0.94, 1.0)
+					env.ambient_light_color = Color(0.92, 0.96, 1.0)
+					if sun_light:
+						sun_light.light_color = Color(1.0, 0.98, 0.92)
+				_:
+					sky_mat.sky_top_color = Color(0.12, 0.50, 0.92)
+					sky_mat.sky_horizon_color = Color(0.74, 0.92, 1.0)
+					env.ambient_light_color = Color(0.95, 0.97, 1.0)
 
 
 func _spawn_fighters() -> void:
-	f1 = AVATAR_SCENE.instantiate() as AvatarFighter
+	f1 = AvatarFighterScene.instantiate()
 	f1.fighter_name = "Jugador 1"
-	f1.team_color = Color(0.05, 0.78, 0.92)
+	f1.team_color = Color(0.06, 0.80, 0.96)
 	add_child(f1)
-	f1.slash_executed.connect(_on_fighter_slash)
-	f1.fell_off_ring.connect(_on_fighter_fell)
-	f1.set_camera_translucent(GameConfig.match_mode == "1p")
 
-	f2 = AVATAR_SCENE.instantiate() as AvatarFighter
-	f2.fighter_name = "Jugador 2" if GameConfig.match_mode == "2p" else "IA"
-	f2.team_color = Color(0.98, 0.44, 0.52)
+	f2 = AvatarFighterScene.instantiate()
+	f2.fighter_name = "Jugador 2" if GameConfig.match_mode == "2p" else "IA (%s)" % GameConfig.get_ai_name()
+	f2.team_color = Color(0.98, 0.34, 0.22)
 	add_child(f2)
-	f2.slash_executed.connect(_on_fighter_slash)
-	f2.fell_off_ring.connect(_on_fighter_fell)
+
+	var use_twins := GameConfig.combat_style == GameConfig.CombatStyle.TWIN_BLADES
+	for f: AvatarFighter in [f1, f2]:
+		f.configure_stage(_stage_type)
+		f.set_twin_blades(use_twins)
+		f.slash_executed.connect(_on_fighter_slash)
+		f.slash_impact.connect(_on_fighter_impact)
+		f.dodge_started.connect(_on_fighter_dodge)
+		f.fell_off_ring.connect(_on_fighter_fell)
+
+	_place_fighters_at_spawn()
+
+
+func _setup_cameras() -> void:
+	if _split_root != null:
+		_split_root.queue_free()
+		_split_root = null
+		_split_cam_p1 = null
+		_split_cam_p2 = null
+
+	if GameConfig.match_mode == "2p":
+		cam.current = false
+		_split_root = HBoxContainer.new()
+		_split_root.name = "SplitScreenRoot"
+		_split_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_split_root.add_theme_constant_override("separation", 4)
+		_split_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		ui_layer.add_child(_split_root)
+		ui_layer.move_child(_split_root, 0)
+
+		var shared_world := get_viewport().find_world_3d()
+		for i in 2:
+			var svc := SubViewportContainer.new()
+			svc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			svc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+			svc.stretch = true
+			svc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			_split_root.add_child(svc)
+
+			var sv := SubViewport.new()
+			sv.world_3d = shared_world
+			sv.handle_input_locally = false
+			svc.add_child(sv)
+
+			var sc := Camera3D.new()
+			sc.fov = 52.0
+			sv.add_child(sc)
+			if i == 0:
+				_split_cam_p1 = sc
+			else:
+				_split_cam_p2 = sc
+	else:
+		cam.current = true
+
+
+func _style_hud() -> void:
+	var top_card := get_node_or_null("UI/HUD/TopCard")
+	if top_card is PanelContainer:
+		var st := StyleBoxFlat.new()
+		st.bg_color = Color(0.05, 0.11, 0.21, 0.78)
+		st.corner_radius_top_left = 14
+		st.corner_radius_top_right = 14
+		st.corner_radius_bottom_left = 14
+		st.corner_radius_bottom_right = 14
+		st.content_margin_left = 16
+		st.content_margin_right = 16
+		st.content_margin_top = 8
+		st.content_margin_bottom = 8
+		top_card.add_theme_stylebox_override("panel", st)
+
+	var bot_card := get_node_or_null("UI/HUD/BottomCard")
+	if bot_card is PanelContainer:
+		var st2 := StyleBoxFlat.new()
+		st2.bg_color = Color(0.05, 0.11, 0.21, 0.78)
+		st2.corner_radius_top_left = 12
+		st2.corner_radius_top_right = 12
+		st2.corner_radius_bottom_left = 12
+		st2.corner_radius_bottom_right = 12
+		st2.content_margin_left = 14
+		st2.content_margin_right = 14
+		st2.content_margin_top = 7
+		st2.content_margin_bottom = 7
+		bot_card.add_theme_stylebox_override("panel", st2)
 
 
 func _place_fighters_at_spawn() -> void:
-	var half_dist := DUEL_DISTANCE * 0.5
-	if GameConfig.match_mode == "1p":
-		f1.reset_for_round(Vector3(0.0, 0.0, half_dist), Vector2(0.0, -1.0))
-		f2.reset_for_round(Vector3(0.0, 0.0, -half_dist), Vector2(0.0, 1.0))
-	else:
-		f1.reset_for_round(Vector3(-half_dist, 0.0, 0.0), Vector2(1.0, 0.0))
-		f2.reset_for_round(Vector3(half_dist, 0.0, 0.0), Vector2(-1.0, 0.0))
+	# Both 1P and 2P spawn along Z so narrow bridges work symmetrically and split cameras align!
+	f1.reset_for_round(Vector3(0.0, 0.0, 0.92), Vector2(0.0, -1.0))
+	f2.reset_for_round(Vector3(0.0, 0.0, -0.92), Vector2(0.0, 1.0))
 
 
-func begin_entry_calibration(_force: bool = true) -> void:
-	_place_fighters_at_spawn()
+func begin_entry_calibration(skip_recenter: bool = false) -> void:
+	Engine.time_scale = 1.0
+	_slowmo_timer = 0.0
+	_hitstop_timer = 0.0
+	if not skip_recenter and _hub != null:
+		_hub.recenter_slot(0)
+		_hub.recenter_slot(1)
 	phase = MatchPhase.CALIBRATE_ENTRY
 	_calib_steady_time = 0.0
-	calib_progress.value = 0.0
+	_calib_total_time = 0.0
+	_last_calib_pips = 0
 	calib_panel.visible = true
-	banner_label.visible = false
-	var dev := MotionHub.slots[0].device_name
-	calib_desc.text = "Dispositivo J1: %s\nApunta hacia la pantalla con el mando o móvil recto.\nMantén quieto 0.5s o pulsa la pantalla para centrar." % dev
-	_update_hud()
+	calib_progress.value = 0.0
+	calib_title.text = "CENTRA TU ESPADA (%s)" % GameConfig.get_stage_name().to_upper()
+	calib_desc.text = (
+		"Apunta el móvil o mando hacia el centro de la pantalla.\n" +
+		"Se calibrará al quedarte quieto 0.4s — o pulsa GUARDIA / Botón para entrar ya."
+	)
+	banner_lbl.text = ""
+	victory_panel.visible = false
+	_place_fighters_at_spawn()
 
 
-func confirm_entry_calibration() -> void:
-	MotionHub.recenter_slot(0)
-	if GameConfig.match_mode == "2p":
-		MotionHub.recenter_slot(1)
+func _complete_entry_calibration() -> void:
+	if _hub != null:
+		_hub.recenter_slot(0)
+		if GameConfig.match_mode == "2p":
+			_hub.recenter_slot(1)
+		_hub.trigger_rumble(0, 0.65, 0.14)
+	if _sfx != null and _sfx.has_method("play_bell"):
+		_sfx.play_bell()
 	calib_panel.visible = false
-	_play_sfx("bell", 1.25, -4.0)
-	MotionHub.trigger_rumble(0, 0.45, 0.08)
+	score_p1 = 0
+	score_p2 = 0
+	round_number = 1
 	_start_round()
 
 
 func _start_round() -> void:
+	Engine.time_scale = 1.0
+	_slowmo_timer = 0.0
+	_hitstop_timer = 0.0
+	_clear_active_waves()
 	_place_fighters_at_spawn()
-	MotionHub.recenter_slot(0)
-	if GameConfig.match_mode == "2p":
-		MotionHub.recenter_slot(1)
-	calib_panel.visible = false
-	round_timer = ROUND_DURATION
-	sudden_death = false
-	_ai_think_timer = 0.55
-	_ai_guard_hold_timer = 1.25
-	_ai_target_roll = 0.0
-	if GameConfig.match_mode == "1p":
-		f2.is_guarding = true
+	round_time = 45.0
 	phase = MatchPhase.INTRO
-	phase_timer = 1.45
-	_show_banner("RONDA %d — ¡LISTOS!\nApunta 45° hacia el monitor • Corte rápido = Atacar • Mantén pulsado = Bloquear" % round_number, 1.45)
-	_update_hud()
+	phase_timer = 1.35
+	victory_panel.visible = false
+	calib_panel.visible = false
+	_ai_timer = randf_range(0.6, 1.05)
+	_ai_guard_pressure = 0.0
+	banner_lbl.text = "¡RONDA %d!" % round_number
+	if _sfx != null and _sfx.has_method("play_bell"):
+		_sfx.play_bell()
 
 
 func _process(delta: float) -> void:
-	if Engine.is_editor_hint():
-		return
-	_fx_time += delta
-	if _water_ring:
-		var pulse := 1.0 + sin(_fx_time * 2.2) * 0.035
-		_water_ring.scale = Vector3(pulse, pulse, 0.12)
+	var real_dt := (delta / maxf(Engine.time_scale, 0.05)) if Engine.time_scale < 0.99 else delta
 
-	_update_clash_fx(delta)
-	_update_banner(delta)
+	_shader_time += real_dt
+	var wmat: ShaderMaterial = _stage_refs.get("water_mat")
+	if wmat != null:
+		wmat.set_shader_parameter("u_time", _shader_time)
+
+	_cam_fov_punch = maxf(0.0, _cam_fov_punch - real_dt * 18.0)
+
+	# Slow-motion countdown uses unscaled real_dt so it never deadlocks!
+	if _slowmo_timer > 0.0:
+		_slowmo_timer = maxf(0.0, _slowmo_timer - real_dt)
+		if _slowmo_timer <= 0.0:
+			Engine.time_scale = 1.0
+
+	if _shake_timer > 0.0:
+		_shake_timer = maxf(0.0, _shake_timer - real_dt)
+
+	_step_sparks(real_dt)
+	_step_waves(delta)
+	_step_stage_physics(real_dt)
 
 	if _hitstop_timer > 0.0:
-		_hitstop_timer -= delta
-		_update_camera(delta)
+		_hitstop_timer = maxf(0.0, _hitstop_timer - real_dt)
+		_update_camera(real_dt)
+		_update_hud()
 		return
 
-	match phase:
-		MatchPhase.CALIBRATE_ENTRY:
-			var s0: MotionHub.PlayerSlot = MotionHub.slots[0]
-			if s0.fusion.angular_speed < 0.95:
-				_calib_steady_time += delta
-			else:
-				_calib_steady_time = maxf(0.0, _calib_steady_time - delta * 1.5)
-			calib_progress.value = clampf((_calib_steady_time / CALIB_STEADY_REQUIRED) * 100.0, 0.0, 100.0)
-			f1.step_fighter(delta, Vector2.ZERO, f2.position, false)
-			f2.step_fighter(delta, Vector2.ZERO, f1.position, false)
-			if _calib_steady_time >= CALIB_STEADY_REQUIRED or s0.just_guard_pressed or s0.just_recenter_pressed:
-				confirm_entry_calibration()
+	if phase == MatchPhase.CALIBRATE_ENTRY:
+		_step_entry_calibration(real_dt)
+		f1.step_fighter(delta, Vector2.ZERO, f2.position, false)
+		f2.step_fighter(delta, Vector2.ZERO, f1.position, false)
+		_update_camera(real_dt)
+		_update_hud()
+		return
 
+	if _hub != null and _hub.slots[0].just_recenter_pressed:
+		_hub.recenter_slot(0)
+	if GameConfig.match_mode == "2p" and _hub != null and _hub.slots[1].just_recenter_pressed:
+		_hub.recenter_slot(1)
+
+	var can_act := (phase == MatchPhase.FIGHTING)
+	var move_p1 := Vector2.ZERO
+	var move_p2 := Vector2.ZERO
+
+	if can_act and _hub != null and script_ai_and_input_enabled:
+		move_p1 = _drive_human_slot(0, f1, delta)
+		if GameConfig.match_mode == "2p":
+			move_p2 = _drive_human_slot(1, f2, delta)
+		else:
+			move_p2 = _drive_ai(delta)
+
+	f1.step_fighter(delta, move_p1, f2.position, can_act)
+	f2.step_fighter(delta, move_p2, f1.position, can_act)
+
+	if _hub != null:
+		_hub.slots[0].hud_guard_meter = f1.guard_meter
+		_hub.slots[0].hud_spirit = f1.spirit
+		if GameConfig.match_mode == "2p":
+			_hub.slots[1].hud_guard_meter = f2.guard_meter
+			_hub.slots[1].hud_spirit = f2.spirit
+
+	if can_act:
+		_enforce_3d_duel_spacing(delta)
+
+	match phase:
 		MatchPhase.INTRO:
 			phase_timer -= delta
-			_drive_fighter_from_slot(f1, 0, delta, f2.position, false)
-			if GameConfig.match_mode == "2p":
-				_drive_fighter_from_slot(f2, 1, delta, f1.position, false)
-			else:
-				f2.step_fighter(delta, Vector2.ZERO, f1.position, false)
+			if phase_timer < 0.45:
+				banner_lbl.text = "¡DUELO!"
 			if phase_timer <= 0.0:
 				phase = MatchPhase.FIGHTING
-				_play_sfx("bell", 1.15, -4.0)
-				_show_banner("¡COMBATE!", 0.75)
-
+				banner_lbl.text = ""
 		MatchPhase.FIGHTING:
-			round_timer -= delta
-			if round_timer <= 0.0 and not sudden_death:
-				round_timer = 0.0
-				sudden_death = true
-				_play_sfx("bell", 1.4, -3.0)
-				_show_banner("¡MUERTE SÚBITA! (Empuje x1.8)", 1.8)
-
-			_update_auto_guard_preview()
-			_drive_fighter_from_slot(f1, 0, delta, f2.position, true)
-			if GameConfig.match_mode == "2p":
-				_drive_fighter_from_slot(f2, 1, delta, f1.position, true)
-			else:
-				_drive_ai(delta)
-			_enforce_3d_duel_spacing(delta)
-
-		MatchPhase.ROUND_END:
+			round_time = maxf(0.0, round_time - delta)
+			if round_time <= 10.0:
+				var rim_mat: StandardMaterial3D = _stage_refs.get("rim_mat")
+				if rim_mat != null:
+					rim_mat.emission_enabled = true
+					rim_mat.emission = Color(1.0, 0.25, 0.15) * (0.45 + 0.35 * sin(_shader_time * 9.0))
+				if banner_lbl.text == "" and round_time > 9.3:
+					banner_lbl.text = "¡MUERTE SÚBITA! (+Empuje)"
+			if round_time <= 0.0:
+				_resolve_timeout()
+		MatchPhase.ROUND_OVER:
 			phase_timer -= delta
-			f1.step_fighter(delta, Vector2.ZERO, f2.position, false)
-			f2.step_fighter(delta, Vector2.ZERO, f1.position, false)
 			if phase_timer <= 0.0:
-				if wins_p1 >= MAX_WINS or wins_p2 >= MAX_WINS:
+				if score_p1 >= 2 or score_p2 >= 2:
 					_finish_match()
 				else:
 					round_number += 1
 					_start_round()
-
 		MatchPhase.MATCH_OVER:
-			f1.step_fighter(delta, Vector2.ZERO, f2.position, false)
-			f2.step_fighter(delta, Vector2.ZERO, f1.position, false)
+			pass
 
-	_update_camera(delta)
+	_update_camera(real_dt)
 	_update_hud()
+	ring_bar.queue_redraw()
+	reticle_hud.queue_redraw()
 
 
-func _update_auto_guard_preview() -> void:
-	if f2.state == AvatarFighter.State.WINDUP or f2.state == AvatarFighter.State.SLASHING:
-		var atk_axis := f2.get_world_slash_axis(f2.windup_slash_dir)
-		var def_axis := f1.get_world_blade_axis()
-		var align := absf(atk_axis.dot(def_axis))
-		var s0: MotionHub.PlayerSlot = MotionHub.slots[0]
-		f1.auto_guard_ready = (f1.state == AvatarFighter.State.NORMAL and not f1.is_guarding and s0.fusion.is_steady and align < 0.52)
-	else:
-		f1.auto_guard_ready = false
-
-
-func _enforce_3d_duel_spacing(delta: float) -> void:
-	if f1.state == AvatarFighter.State.FALLING or f2.state == AvatarFighter.State.FALLING:
+func _step_stage_physics(real_dt: float) -> void:
+	if _stage_type != GameConfig.ArenaStage.SKY_SANCTUARY:
 		return
-	var p1 := Vector2(f1.position.x, f1.position.z)
-	var p2 := Vector2(f2.position.x, f2.position.z)
-	var delta_xz := p2 - p1
-	var sep := delta_xz.length()
-	var dir_1_to_2 := delta_xz / sep if sep > 0.01 else Vector2(0.0, -1.0)
-
-	var min_sep := DUEL_DISTANCE * 0.85
-	if sep < min_sep:
-		var push_apart := (min_sep - sep) * 0.5
-		p1 -= dir_1_to_2 * push_apart
-		p2 += dir_1_to_2 * push_apart
-	elif sep > DUEL_DISTANCE:
-		if p1.length() >= AvatarFighter.PLATFORM_RADIUS or p2.length() >= AvatarFighter.PLATFORM_RADIUS:
-			return
-		var excess := sep - DUEL_DISTANCE
-		var v1_back := -f1.velocity_xz.dot(dir_1_to_2)
-		var v2_back := f2.velocity_xz.dot(dir_1_to_2)
-		var max_step := (10.5 if (v1_back > 0.25 or v2_back > 0.25) else 4.2) * delta
-		var step := minf(excess, max_step)
-		if v2_back > 0.20 or f2.guard_break_timer > 0.0 or (f2.state == AvatarFighter.State.STUNNED and v2_back >= v1_back):
-			p1 += dir_1_to_2 * step
-		elif v1_back > 0.20 or f1.guard_break_timer > 0.0 or (f1.state == AvatarFighter.State.STUNNED and v1_back > v2_back):
-			p2 -= dir_1_to_2 * step
-		elif f1.state == AvatarFighter.State.SLASHING and f2.state != AvatarFighter.State.SLASHING:
-			p1 += dir_1_to_2 * step
-		elif f2.state == AvatarFighter.State.SLASHING and f1.state != AvatarFighter.State.SLASHING:
-			p2 -= dir_1_to_2 * step
-		elif sep > DUEL_DISTANCE + 0.65:
-			p1 += dir_1_to_2 * (step * 0.5)
-			p2 -= dir_1_to_2 * (step * 0.5)
-
-	f1.position.x = p1.x
-	f1.position.z = p1.y
-	f2.position.x = p2.x
-	f2.position.z = p2.y
+	var pivot: Node3D = _stage_refs.get("platform_pivot")
+	if pivot == null:
+		return
+	var com := (f1.position + f2.position) * 0.5
+	var target_rx := clampf(com.z * 0.025, -0.08, 0.08)
+	var target_rz := clampf(-com.x * 0.025, -0.08, 0.08)
+	pivot.rotation.x = lerpf(pivot.rotation.x, target_rx, clampf(real_dt * 4.0, 0.0, 1.0))
+	pivot.rotation.z = lerpf(pivot.rotation.z, target_rz, clampf(real_dt * 4.0, 0.0, 1.0))
 
 
-func _drive_fighter_from_slot(fighter: AvatarFighter, slot_idx: int, delta: float, opp_pos: Vector3, can_act: bool) -> void:
-	var s: MotionHub.PlayerSlot = MotionHub.slots[slot_idx]
+func _step_entry_calibration(delta: float) -> void:
+	_calib_total_time += delta
+	if _hub == null:
+		calib_progress.value = 100.0
+		_complete_entry_calibration()
+		return
+
+	var s0 = _hub.slots[0]
+	f1.blade_orientation = s0.fusion.orientation
+	f1.blade_roll_rad = s0.fusion.blade_roll_rad
+
+	var is_quiet: bool = s0.fusion.angular_speed < 0.72 and not s0.fusion.just_swung
+	if is_quiet:
+		_calib_steady_time += delta
+	else:
+		_calib_steady_time = maxf(0.0, _calib_steady_time - delta * 1.1)
+
+	var pct := clampf(_calib_steady_time / 0.42, 0.0, 1.0)
+	calib_progress.value = pct * 100.0
+
+	var pips := int(pct * 3.0)
+	if pips > _last_calib_pips and pips < 3:
+		_last_calib_pips = pips
+		if _sfx != null:
+			_sfx.play("parry", 0.9 + pips * 0.15, -10.0)
+
+	if s0.just_guard_pressed or s0.just_strike_pressed or Input.is_action_just_pressed("ui_accept") or _calib_steady_time >= 0.42 or _calib_total_time >= 4.0:
+		_complete_entry_calibration()
+
+
+func _drive_human_slot(slot_idx: int, fighter: AvatarFighter, _delta: float) -> Vector2:
+	var s = _hub.slots[slot_idx]
 	fighter.blade_orientation = s.fusion.orientation
-	fighter.blade_roll_rad = s.fusion.get_snapped_blade_roll_rad()
+	fighter.blade_roll_rad = s.fusion.blade_roll_rad
 	fighter.is_guarding = s.is_guarding
+	fighter.auto_guard_ready = (not s.is_guarding) and s.fusion.is_steady
 
-	if can_act and fighter.state == AvatarFighter.State.NORMAL:
-		if s.fusion.just_swung:
-			fighter.trigger_slash(s.fusion.last_slash_dir, s.fusion.last_slash_power)
+	# Stream latest flick acceleration so early-threshold swings still hit with full arm speed!
+	if fighter.state == AvatarFighter.State.SLASHING and not fighter._hit_resolved_this_swing:
+		var live_p: float = s.fusion.compute_live_power_from_peak(s.fusion.active_peak_speed)
+		fighter.update_live_slash_power(live_p)
 
-	fighter.step_fighter(delta, s.move_axis, opp_pos, can_act)
+	if fighter.state == AvatarFighter.State.NORMAL:
+		if s.just_dodge_pressed:
+			fighter.trigger_dodge(s.move_axis)
+			return Vector2.ZERO
+		if s.buffered_strike_timer > 0.0:
+			var atk_t: int = s.buffered_strike_type
+			var dir: Vector2 = s.buffered_strike_dir
+			var pow_val: float = s.buffered_strike_power
+			s.buffered_strike_timer = 0.0
+			fighter.trigger_slash(dir, pow_val, atk_t)
+		elif s.fusion.just_swung:
+			fighter.trigger_slash(s.fusion.last_slash_dir, s.fusion.last_slash_power, s.fusion.last_slash_type)
+			s.buffered_strike_timer = 0.0
+
+	var mv: Vector2 = s.move_axis
+	if slot_idx == 0 and mv.length() < 0.05:
+		var kx := Input.get_axis("ui_left", "ui_right")
+		var ky := Input.get_axis("ui_up", "ui_down")
+		mv = Vector2(kx, ky).limit_length(1.0)
+	if Input.is_action_just_pressed("ui_accept") and slot_idx == 0 and s.source_type != MotionHub.SourceType.MOUSE:
+		fighter.trigger_dodge(mv)
+	return mv
 
 
-func _drive_ai(delta: float) -> void:
-	var diff := GameConfig.ai_difficulty
-	var windup_dur := 0.88 if diff == 0 else (0.72 if diff == 1 else 0.56)
-	var think_interval := 0.72 if diff == 0 else (0.55 if diff == 1 else 0.42)
-	var guard_poses: Array[float] = [0.0, PI * 0.25, -PI * 0.25, PI * 0.5]
-	var slash_angles: Array[Vector2] = [
-		Vector2(1.0, 0.0),
-		Vector2(0.0, 1.0),
-		Vector2(0.7071, 0.7071),
-		Vector2(0.7071, -0.7071)
-	]
+func _drive_ai(delta: float) -> Vector2:
+	if f2.state == AvatarFighter.State.STUNNED or f2.state == AvatarFighter.State.FALLING:
+		f2.is_guarding = false
+		return Vector2.ZERO
 
-	_ai_guard_hold_timer = maxf(0.0, _ai_guard_hold_timer - delta)
-	_ai_think_timer -= delta
-	if f2.state == AvatarFighter.State.NORMAL and f1.state == AvatarFighter.State.STUNNED and f2.is_guarding:
-		_ai_think_timer = minf(_ai_think_timer, 0.20)
+	_ai_timer -= delta
+	_ai_strafe_timer -= delta
+	var level := clampi(GameConfig.ai_difficulty, 0, 3)
+	var diff_reaction: float = [0.22, 0.14, 0.075, 0.03][level]
+	var guard_chance: float = [0.35, 0.56, 0.78, 0.90][level]
+	var atk_rate_min: float = [1.15, 0.78, 0.52, 0.35][level]
+	var atk_rate_max: float = [1.65, 1.25, 0.85, 0.58][level]
+	var windup_dur: float = [0.68, 0.50, 0.36, 0.25][level]
 
-	if f2.state == AvatarFighter.State.NORMAL and _ai_think_timer <= 0.0:
-		var dist := f1.position.distance_to(f2.position)
-		if f1.state == AvatarFighter.State.STUNNED and dist < 2.6:
-			f2.is_guarding = false
-			_ai_guard_hold_timer = 0.0
-			_ai_think_timer = 0.66
-			var punish_dir := slash_angles[randi() % slash_angles.size()]
-			f2.start_windup(punish_dir, 0.36)
-			_play_sfx("windup", 1.15, -7.0)
-		elif _ai_guard_hold_timer <= 0.0:
-			_ai_think_timer = think_interval * randf_range(0.85, 1.15)
-			var atk_prob := 0.36 if diff == 0 else (0.46 if diff == 1 else 0.56)
-			if dist < 2.65 and randf() < atk_prob:
-				f2.is_guarding = false
-				_ai_think_timer = windup_dur + 0.32
-				var atk_dir := slash_angles[randi() % slash_angles.size()]
-				f2.start_windup(atk_dir, windup_dur)
-				_play_sfx("windup", 0.95 + diff * 0.08, -7.5)
-			elif randf() < (0.68 if diff == 0 else (0.78 if diff == 1 else 0.85)):
-				f2.is_guarding = true
-				var choices := guard_poses.duplicate()
-				choices.shuffle()
-				for p in choices:
-					if absf(p - _ai_target_roll) > 0.15:
-						_ai_target_roll = p
-						break
-				_ai_guard_hold_timer = randf_range(1.05, 1.50)
-				_ai_think_timer = _ai_guard_hold_timer
-			else:
-				f2.is_guarding = false
-				_ai_guard_hold_timer = 0.45
-				_ai_think_timer = 0.45
+	var to_p1 := Vector2(f1.position.x - f2.position.x, f1.position.z - f2.position.z)
+	var dist := to_p1.length()
+	var f2_pos := Vector2(f2.position.x, f2.position.z)
+	var edge_danger := DojoStageScript.get_edge_ratio(f2_pos, _stage_type)
+
+	if f1.is_guarding:
+		_ai_guard_pressure += delta
+	else:
+		_ai_guard_pressure = maxf(0.0, _ai_guard_pressure - delta * 2.0)
+
+	if _ai_strafe_timer <= 0.0:
+		_ai_strafe_timer = randf_range(0.55, 1.15)
+		_ai_move.x = randf_range(-0.85, 0.85)
+
+	# Footwork: hold sweetspot distance ~1.8m, stay centered away from abyss/lava
+	if edge_danger > 0.68:
+		var back_to_center := -f2_pos.normalized()
+		var fwd := f2.facing_dir
+		var right := Vector2(-fwd.y, fwd.x)
+		_ai_move = Vector2(back_to_center.dot(right), -back_to_center.dot(fwd)).limit_length(1.0)
+		if level >= 2 and edge_danger > 0.80 and f2.state == AvatarFighter.State.NORMAL and f2.dodge_cooldown_timer <= 0.0:
+			f2.trigger_dodge(_ai_move)
+	elif dist > 2.35:
+		_ai_move.y = -0.78
+	elif dist < 1.38:
+		_ai_move.y = 0.65
+	else:
+		_ai_move.y = 0.0
 
 	if f2.state == AvatarFighter.State.NORMAL:
-		f2.blade_roll_rad = lerp_angle(f2.blade_roll_rad, _ai_target_roll, clampf(delta * 10.0, 0.0, 1.0))
-	f2.step_fighter(delta, Vector2.ZERO, f1.position, true)
+		if f1.state == AvatarFighter.State.STUNNED and _ai_timer > 0.28:
+			_ai_timer = 0.14
+
+		if f1.state == AvatarFighter.State.SLASHING and f1.attack_type == AvatarFighter.AttackType.CUT:
+			f2.is_guarding = (randf() < guard_chance)
+			var perp_roll := wrapf(atan2(f1.active_slash_dir.y, f1.active_slash_dir.x), -PI * 0.5, PI * 0.5)
+			if level <= 1 and randf() < 0.35:
+				perp_roll += PI * 0.5
+			_ai_target_roll = clampf(perp_roll, -PI * 0.5, PI * 0.5)
+		elif f1.is_guarding and level >= 1 and _ai_timer < 0.25:
+			f2.is_guarding = false
+			var p1_guard_axis := atan2(f1.get_guard_blade_dir_2d().y, f1.get_guard_blade_dir_2d().x)
+			_ai_target_roll = clampf(wrapf(p1_guard_axis, -PI * 0.5, PI * 0.5), -PI * 0.5, PI * 0.5)
+		elif _ai_timer < diff_reaction:
+			f2.is_guarding = false
+
+		f2.blade_roll_rad = lerp_angle(f2.blade_roll_rad, _ai_target_roll, clampf(delta * 10.5, 0.0, 1.0))
+
+		if _ai_timer <= 0.0 and dist < 2.95:
+			_ai_timer = randf_range(atk_rate_min, atk_rate_max)
+			var use_thrust := (_ai_guard_pressure > 1.25 and level >= 1 and randf() < 0.55)
+			var dirs: Array[Vector2] = [
+				Vector2(1.0, 0.0), Vector2(-1.0, 0.0),
+				Vector2(0.0, 1.0), Vector2(0.0, -1.0),
+				Vector2(0.707, 0.707), Vector2(-0.707, 0.707),
+				Vector2(0.707, -0.707), Vector2(-0.707, -0.707)
+			]
+			var chosen: Vector2 = dirs[randi() % dirs.size()]
+			if level >= 1 and f1.is_guarding and not use_thrust:
+				var p1_blade := f1.get_guard_blade_dir_2d()
+				chosen = p1_blade if randf() < 0.78 else chosen
+			if use_thrust:
+				_ai_guard_pressure = 0.0
+				f2.start_windup(Vector2(0.0, -1.0), windup_dur * 0.9, AvatarFighter.AttackType.THRUST)
+			else:
+				f2.start_windup(chosen, windup_dur, AvatarFighter.AttackType.CUT)
+
+	return _ai_move
 
 
-func _on_fighter_slash(attacker: AvatarFighter, slash_dir: Vector2, power: float) -> void:
+func _on_fighter_slash(attacker: AvatarFighter, _slash_dir: Vector2, power: float) -> void:
 	if phase != MatchPhase.FIGHTING:
 		return
-	var defender := f2 if attacker == f1 else f1
-	var attacker_slot := 0 if attacker == f1 else 1
-	var defender_slot := 1 if attacker == f1 else 0
+	var step_spd := (1.85 + power * 0.72) if attacker.attack_type == AvatarFighter.AttackType.THRUST else (1.15 + power * 0.55)
+	attacker.velocity_xz += attacker.facing_dir * step_spd
 
-	if defender.state == AvatarFighter.State.FALLING:
+	# Release Master Blade Crescent Energy Wave when swinging at 100% Spirit!
+	if attacker.spirit >= 100.0 and attacker.attack_type != AvatarFighter.AttackType.WAVE:
+		attacker.spirit = 0.0
+		_spawn_spirit_wave(attacker, attacker.active_slash_dir, maxf(power, 1.25))
+
+
+func _on_fighter_dodge(fighter: AvatarFighter, dodge_dir: Vector2) -> void:
+	_spawn_sparks(fighter.position + Vector3(0.0, 0.3, 0.0) - Vector3(dodge_dir.x, 0.0, dodge_dir.y) * 0.25, Color(0.55, 0.95, 1.0), 8)
+
+
+func _on_fighter_impact(attacker: AvatarFighter, slash_dir: Vector2, power: float, atk_type: int) -> void:
+	if phase != MatchPhase.FIGHTING:
+		return
+	var defender: AvatarFighter = f2 if attacker == f1 else f1
+	_resolve_melee_exchange(attacker, defender, slash_dir, power, atk_type)
+
+
+func _resolve_melee_exchange(attacker: AvatarFighter, defender: AvatarFighter, slash_dir: Vector2, power: float, atk_type: int) -> void:
+	if defender.state == AvatarFighter.State.FALLING or attacker.state == AvatarFighter.State.FALLING:
 		return
 
-	var dist_xz := Vector2(attacker.position.x - defender.position.x, attacker.position.z - defender.position.z).length()
-	if dist_xz > 2.75:
+	var att_idx := 0 if attacker == f1 else 1
+	var def_idx := 1 if attacker == f1 else 0
+	var dir_to_def := Vector2(defender.position.x - attacker.position.x, defender.position.z - attacker.position.z)
+	var dist_xz := dir_to_def.length()
+	var max_reach := 3.15 if atk_type == AvatarFighter.AttackType.THRUST else (2.72 if attacker.twin_blades_enabled else 2.85)
+	if dist_xz > max_reach:
 		return
 
-	var push_dir := attacker.facing_dir
-	var mult := 1.8 if sudden_death else 1.0
-	var attacker_is_human := (attacker == f1) or (GameConfig.match_mode == "2p")
-	var defender_is_human := (defender == f1) or (GameConfig.match_mode == "2p")
+	var push_dir := dir_to_def.normalized() if dist_xz > 0.05 else attacker.facing_dir
+	var mid := (attacker.position + defender.position) * 0.5 + Vector3(0.0, 1.15, 0.0)
+	var sd_mult := 1.22 if round_time <= 10.0 else 1.0
 
-	# Switch Sports Sword Clash: simultaneous swing or colliding late in opponent windup
-	if defender.state == AvatarFighter.State.SLASHING or (defender.state == AvatarFighter.State.WINDUP and defender.windup_timer < 0.20):
+	# 1. Sidestep dodge i-frames!
+	if defender.iframe_timer > 0.0:
+		defender.spirit = minf(100.0, defender.spirit + 20.0)
+		attacker.velocity_xz += push_dir * 0.7
+		_spawn_sparks(mid, Color(0.5, 0.96, 1.0), 10)
+		if _sfx:
+			_sfx.play("dash", 1.25, -4.0)
+		banner_lbl.text = "¡ESQUIVA PERFECTA! (%s)" % defender.fighter_name
+		return
+
+	# 2. Simultaneous Sword Clash!
+	if defender.state == AvatarFighter.State.SLASHING or (defender.state == AvatarFighter.State.WINDUP and defender.windup_timer < 0.26):
 		attacker.cancel_attack_from_clash(-push_dir * 1.45)
 		defender.cancel_attack_from_clash(push_dir * 1.45)
-		_spawn_clash_fx((attacker.position + defender.position) * 0.5 + Vector3(0.0, 0.98, 0.0), Color(1.0, 0.96, 0.85))
-		_play_sfx("parry", 1.25, -2.5)
-		if attacker_is_human:
-			MotionHub.trigger_rumble(attacker_slot, 0.72, 0.11)
-		if defender_is_human:
-			MotionHub.trigger_rumble(defender_slot, 0.72, 0.11)
-		_hitstop_timer = 0.065
-		_shake_amount = 0.22
-		_show_banner("⚡ ¡CHOQUE DE ESPADAS!", 0.75)
+		attacker.spirit = minf(100.0, attacker.spirit + 12.0)
+		defender.spirit = minf(100.0, defender.spirit + 12.0)
+		_spawn_sparks(mid, Color(1.0, 0.95, 0.55), 18)
+		_hitstop_timer = 0.045
+		_trigger_shake(0.16, 0.11)
+		if _sfx:
+			_sfx.play("parry", 0.92, -1.5)
+		if _hub != null:
+			_hub.trigger_rumble(0, 0.7, 0.12)
+			_hub.trigger_rumble(1, 0.7, 0.12)
+		banner_lbl.text = "¡CHOQUE DE ESPADAS!"
 		return
 
-	var slash_axis := attacker.get_world_slash_axis(slash_dir)
-	var guard_axis := defender.get_world_blade_axis()
-	var alignment := absf(slash_axis.dot(guard_axis))
-
-	var is_active_guard := (defender.state == AvatarFighter.State.NORMAL and defender.is_guarding)
-	var def_slot: MotionHub.PlayerSlot = MotionHub.slots[defender_slot]
-	var is_passive_guard := defender_is_human and defender.state == AvatarFighter.State.NORMAL and not defender.is_guarding and def_slot.fusion.is_steady
-
-	if (is_active_guard and alignment < 0.62) or (is_passive_guard and alignment < 0.52):
-		# Perpendicular Parry -> stun attacker 1.65s + charge defender's next counter-strike!
-		attacker.is_charged = false
-		attacker.apply_stun(1.65)
-		defender.is_charged = true
-		defender.apply_knockback(push_dir * 0.75)
-		_spawn_clash_fx((attacker.position + defender.position) * 0.5 + Vector3(0.0, 0.98, 0.0), Color(1.0, 0.92, 0.28))
-		_play_sfx("parry", randf_range(0.95, 1.10), -1.5)
-		if attacker_is_human:
-			MotionHub.trigger_rumble(attacker_slot, 0.95, 0.16)
-		if defender_is_human:
-			MotionHub.trigger_rumble(defender_slot, 0.80, 0.14)
-		_hitstop_timer = 0.11
-		_shake_amount = 0.28
-		_show_banner("⚡ ¡BLOQUEO! ¡CONTRAATACA!" if is_active_guard else "⚡ ¡AUTOBLOQUEO! ¡CONTRAATACA!", 1.15)
-	elif is_active_guard:
-		# Parallel Guard Overcome -> knocks defender back cleanly without freezing them in stun stars
-		var charge_mult := 1.65 if attacker.is_charged else 1.0
-		attacker.is_charged = false
-		defender.guard_break_timer = 0.16
-		defender.apply_knockback(push_dir * (3.6 * mult * charge_mult))
-		_spawn_clash_fx(defender.position + Vector3(0.0, 0.95, 0.0), Color(1.0, 0.55, 0.25))
-		_play_sfx("guard_break", 1.05, -2.0)
-		if attacker_is_human:
-			MotionHub.trigger_rumble(attacker_slot, 0.65, 0.12)
-		if defender_is_human:
-			MotionHub.trigger_rumble(defender_slot, 0.95, 0.16)
-		_hitstop_timer = 0.055
-		_shake_amount = 0.24
-		_show_banner("¡GUARDIA SUPERADA!", 0.80)
-	else:
-		# Direct Hit / Multi-hit Stun Combo
-		var was_stunned := defender.state == AvatarFighter.State.STUNNED
-		var was_charged := attacker.is_charged
-		var charge_mult := 1.65 if was_charged else 1.0
-		attacker.is_charged = false
-		if defender.state == AvatarFighter.State.WINDUP:
+	# 3. Follow-up strike on STUNNED opponent!
+	if defender.state == AvatarFighter.State.STUNNED:
+		defender.stun_timer -= 0.45
+		if defender.stun_timer <= 0.05:
 			defender.state = AvatarFighter.State.NORMAL
-		var force := 4.2 * power * mult * charge_mult
-		defender.apply_knockback(push_dir * force)
-		if was_stunned:
-			defender.stun_timer = maxf(0.0, defender.stun_timer - 0.45)
-			if defender.stun_timer <= 0.0:
-				defender.state = AvatarFighter.State.NORMAL
-		_spawn_clash_fx(defender.position + Vector3(0.0, 0.95, 0.0), Color(1.0, 0.85, 0.2) if was_charged else attacker.team_color)
-		_play_sfx("hit", 0.82 if was_charged else (0.92 if was_stunned else 1.05), -1.8)
-		if attacker_is_human:
-			MotionHub.trigger_rumble(attacker_slot, 0.78 if was_charged else 0.65, 0.12)
-		if defender_is_human:
-			MotionHub.trigger_rumble(defender_slot, 1.0, 0.20)
-		_hitstop_timer = 0.075 if was_charged else (0.045 if was_stunned else 0.035)
-		_shake_amount = 0.38 if was_charged else (0.28 if was_stunned else 0.18)
-		if was_charged:
-			_show_banner("🔥 ¡GOLPE CARGADO!", 0.85)
-		elif was_stunned:
-			_show_banner("⚡ ¡COMBO DE CONTRAATAQUE!", 0.75)
+			defender.stun_timer = 0.0
+		var charged_mult := 1.65 if attacker.is_charged else 1.0
+		attacker.is_charged = false
+		var heavy_imp := push_dir * (4.4 * clampf(power, 0.72, 1.65) * charged_mult * sd_mult)
+		defender.apply_knockback(heavy_imp)
+		attacker.spirit = minf(100.0, attacker.spirit + (10.0 if charged_mult > 1.1 else 22.0))
+		_spawn_sparks(mid, Color(1.0, 0.78, 0.22), 18)
+		_hitstop_timer = 0.055 if charged_mult > 1.1 else 0.035
+		_cam_fov_punch = 3.5 if charged_mult > 1.1 else 1.8
+		_trigger_shake(0.24, 0.16)
+		if _sfx:
+			_sfx.play("hit", randf_range(1.05, 1.28), 0.5)
+		if _hub != null:
+			_hub.trigger_haptic_pattern(att_idx, [35, 25, 65])
+			_hub.trigger_rumble(def_idx, 1.0, 0.22)
+		banner_lbl.text = "¡GOLPE CRÍTICO!" if charged_mult > 1.1 else "¡REMATE EN ATURDIMIENTO!"
+		return
+
+	# 4. Guard, Perfect Parry, Passive Deflect, or Piercing Thrust!
+	var can_guard_slot := true
+	var slot_steady := defender.auto_guard_ready
+	if _hub != null and (def_idx == 0 or GameConfig.match_mode == "2p"):
+		slot_steady = _hub.slots[def_idx].fusion.is_steady
+	var has_active_guard := defender.is_guarding and defender.guard_break_timer <= 0.0 and can_guard_slot
+	var has_passive_guard := (not defender.is_guarding) and slot_steady and defender.guard_break_timer <= 0.0
+
+	if has_active_guard or (has_passive_guard and atk_type != AvatarFighter.AttackType.THRUST):
+		var blade_axis := defender.get_world_blade_axis()
+		var slash_axis := attacker.get_world_slash_axis(slash_dir)
+		var dot := absf(blade_axis.dot(slash_axis))
+		var is_perp := (dot <= 0.62)
+
+		if atk_type == AvatarFighter.AttackType.THRUST:
+			# Estocada pierces static guards unless defender hit a Timed Perfect Parry!
+			if has_active_guard and defender.guard_held_time <= 0.22:
+				_trigger_perfect_parry(attacker, defender, push_dir, mid, att_idx, def_idx)
+				return
+			else:
+				defender.guard_meter = maxf(0.0, defender.guard_meter - 35.0)
+				defender.guard_break_timer = 0.20
+				defender.apply_knockback(push_dir * (3.9 * power * sd_mult))
+				attacker.spirit = minf(100.0, attacker.spirit + 22.0)
+				_spawn_sparks(mid, Color(1.0, 0.6, 0.25), 14)
+				_trigger_shake(0.18, 0.12)
+				if _sfx:
+					_sfx.play("hit", 1.1, -1.0)
+				banner_lbl.text = "¡ESTOCADA PERFORA GUARDIA!"
+				return
+
+		if is_perp:
+			if has_active_guard:
+				if defender.guard_held_time <= 0.22:
+					_trigger_perfect_parry(attacker, defender, push_dir, mid, att_idx, def_idx)
+				else:
+					# Solid Block (held Guard early)
+					attacker.apply_knockback(-push_dir * 2.15)
+					defender.apply_knockback(push_dir * 1.15)
+					defender.guard_meter = maxf(0.0, defender.guard_meter - 14.0)
+					defender.spirit = minf(100.0, defender.spirit + 18.0)
+					_spawn_sparks(mid, Color(0.45, 0.90, 1.0), 14)
+					_hitstop_timer = 0.032
+					_trigger_shake(0.12, 0.08)
+					if _sfx:
+						_sfx.play("block", randf_range(0.95, 1.1), -2.0)
+					if _hub != null:
+						_hub.trigger_rumble(att_idx, 0.55, 0.10)
+						_hub.trigger_rumble(def_idx, 0.45, 0.09)
+					banner_lbl.text = "¡BLOQUEADO!"
+			else:
+				# Zero-button Passive Glancing Deflect (safe buffer, no free 1.65s stun)
+				defender.apply_knockback(push_dir * (1.85 * power * sd_mult))
+				attacker.apply_knockback(-push_dir * 1.05)
+				defender.spirit = minf(100.0, defender.spirit + 8.0)
+				_spawn_sparks(mid, Color(0.75, 0.95, 1.0), 10)
+				_trigger_shake(0.08, 0.05)
+				if _sfx:
+					_sfx.play("parry", 0.95, -5.0)
+				banner_lbl.text = "Desvío Pasivo (Usa GUARDIA para Parry)"
+			return
+
+		elif has_active_guard:
+			# Parallel strike overcomes active guard!
+			var gm_cost := 45.0 * clampf(power, 0.8, 1.5)
+			defender.guard_meter = maxf(0.0, defender.guard_meter - gm_cost)
+			defender.guard_break_timer = 0.22
+			defender.apply_knockback(push_dir * (3.6 * clampf(power, 0.8, 1.5) * sd_mult))
+			attacker.spirit = minf(100.0, attacker.spirit + 18.0)
+			if defender.guard_meter <= 0.0:
+				defender.apply_stun(1.65)
+				_spawn_sparks(mid, Color(1.0, 0.35, 0.18), 22)
+				_hitstop_timer = 0.06
+				_trigger_shake(0.24, 0.15)
+				if _sfx:
+					_sfx.play("guard_break", 0.85, 0.0)
+				banner_lbl.text = "💥 ¡ROTURA DE GUARDIA TOTAL!"
+			else:
+				_spawn_sparks(mid, Color(1.0, 0.5, 0.2), 14)
+				_trigger_shake(0.18, 0.12)
+				if _sfx:
+					_sfx.play("hit", 0.82, -1.5)
+				if _hub != null:
+					_hub.trigger_rumble(def_idx, 0.85, 0.16)
+				banner_lbl.text = "¡GUARDIA SUPERADA! %s" % defender.fighter_name
+			return
+
+	# 5. Clean Direct Hit!
+	var mult := (1.65 if attacker.is_charged else 1.0) * sd_mult
+	var thrust_bonus := 1.15 if atk_type == AvatarFighter.AttackType.THRUST else 1.0
+	attacker.is_charged = false
+	var impulse := push_dir * (4.4 * clampf(power, 0.72, 1.65) * mult * thrust_bonus)
+	defender.apply_knockback(impulse)
+	attacker.spirit = minf(100.0, attacker.spirit + 22.0)
+	defender.spirit = minf(100.0, defender.spirit + 10.0)
+	_spawn_sparks(mid, Color(1.0, 0.65, 0.25), 14)
+	_hitstop_timer = 0.045
+	_cam_fov_punch = 2.4 if mult > 1.2 else 1.1
+	_trigger_shake(0.18, 0.12)
+	if _sfx:
+		_sfx.play("hit", randf_range(0.88, 1.14), -1.0)
+	if _hub != null:
+		_hub.trigger_rumble(att_idx, 0.45, 0.09)
+		_hub.trigger_rumble(def_idx, 0.90, 0.18)
+
+
+func _trigger_perfect_parry(attacker: AvatarFighter, defender: AvatarFighter, push_dir: Vector2, mid: Vector3, att_idx: int, def_idx: int) -> void:
+	attacker.apply_stun(1.65)
+	defender.is_charged = true
+	defender.spirit = minf(100.0, defender.spirit + 38.0)
+	attacker.apply_knockback(-push_dir * 0.8)
+	_spawn_sparks(mid, Color(0.28, 0.96, 1.0), 26)
+	Engine.time_scale = 0.25
+	_slowmo_timer = 0.26
+	_cam_fov_punch = 4.2
+	_trigger_shake(0.26, 0.16)
+	if _sfx:
+		_sfx.play("perfect_parry", randf_range(0.96, 1.08), 0.5)
+	if _hub != null:
+		_hub.trigger_haptic_pattern(def_idx, [22, 25, 95])
+		_hub.trigger_rumble(att_idx, 0.95, 0.25)
+	banner_lbl.text = "⚡ ¡PARRY PERFECTO! CONTRAATAQUE LISTO"
+
+
+func _spawn_spirit_wave(attacker: AvatarFighter, slash_dir: Vector2, power: float) -> void:
+	var wave := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(1.55, 0.14, 0.36)
+	wave.mesh = bm
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.95, 0.98, 1.0, 0.92)
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.84, 0.25) * 2.4
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	wave.material_override = mat
+
+	var forward_dir := attacker.facing_dir
+	wave.position = attacker.position + Vector3(forward_dir.x * 0.8, 1.05, forward_dir.y * 0.8)
+	var yaw := atan2(-forward_dir.y, forward_dir.x)
+	var roll_tilt := atan2(slash_dir.y, slash_dir.x)
+	wave.rotation = Vector3(0.0, yaw, roll_tilt)
+	add_child(wave)
+
+	if _sfx:
+		_sfx.play("charge", 1.15, -2.0)
+	banner_lbl.text = "🔥 ¡ONDA DE ESPADA MAESTRA! (%s)" % attacker.fighter_name
+
+	_waves.append({
+		"mesh": wave,
+		"attacker": attacker,
+		"dir": forward_dir,
+		"power": power,
+		"life": 0.42
+	})
+
+
+func _step_waves(delta: float) -> void:
+	for i in range(_waves.size() - 1, -1, -1):
+		var w := _waves[i]
+		var mesh: MeshInstance3D = w["mesh"]
+		var dir: Vector2 = w["dir"]
+		var att: AvatarFighter = w["attacker"]
+		var def: AvatarFighter = f2 if att == f1 else f1
+		w["life"] -= delta
+
+		if not is_instance_valid(mesh) or phase != MatchPhase.FIGHTING:
+			if is_instance_valid(mesh):
+				mesh.queue_free()
+			_waves.remove_at(i)
+			continue
+
+		mesh.position.x += dir.x * 12.5 * delta
+		mesh.position.z += dir.y * 12.5 * delta
+		mesh.scale.x += delta * 2.8
+
+		var to_def := Vector2(def.position.x - mesh.position.x, def.position.z - mesh.position.z)
+		if to_def.length() < 0.85:
+			if def.iframe_timer <= 0.0:
+				var imp := dir * (5.6 * clampf(float(w["power"]), 1.0, 1.65))
+				def.apply_knockback(imp)
+				_spawn_sparks(mesh.position, Color(1.0, 0.85, 0.25), 22)
+				_trigger_shake(0.24, 0.16)
+				if _sfx:
+					_sfx.play("hit", 1.18, 0.5)
+			else:
+				banner_lbl.text = "¡ONDA ESQUIVADA!"
+			mesh.queue_free()
+			_waves.remove_at(i)
+			continue
+
+		if w["life"] <= 0.0:
+			mesh.queue_free()
+			_waves.remove_at(i)
+
+
+func _clear_active_waves() -> void:
+	for w in _waves:
+		var m = w.get("mesh")
+		if is_instance_valid(m):
+			m.queue_free()
+	_waves.clear()
+
+
+func _enforce_3d_duel_spacing(_delta: float) -> void:
+	if f1.state == AvatarFighter.State.FALLING or f2.state == AvatarFighter.State.FALLING:
+		return
+	var diff := Vector2(f2.position.x - f1.position.x, f2.position.z - f1.position.z)
+	var dist := diff.length()
+	var n := diff.normalized() if dist > 0.05 else Vector2(0.0, -1.0)
+	# Only push apart overlapping fighter bodies (< 1.12m); NEVER pull players together magnetically!
+	if dist < 1.12:
+		var push := (1.12 - dist) * 0.5
+		f1.position.x -= n.x * push
+		f1.position.z -= n.y * push
+		f2.position.x += n.x * push
+		f2.position.z += n.y * push
 
 
 func _on_fighter_fell(loser: AvatarFighter) -> void:
 	if phase != MatchPhase.FIGHTING:
 		return
-	phase = MatchPhase.ROUND_END
-	phase_timer = 2.0
+	var ring: MeshInstance3D = _stage_refs.get("ripple_ring")
+	if ring != null:
+		ring.position = Vector3(loser.position.x, -1.56, loser.position.z)
+		ring.scale = Vector3(0.4, 1.0, 0.4)
+		ring.visible = true
+	Engine.time_scale = 1.0
+	_slowmo_timer = 0.0
+
 	if loser == f2:
-		wins_p1 += 1
-		_show_banner("¡RONDA PARA JUGADOR 1!", 1.9)
+		score_p1 += 1
+		banner_lbl.text = "¡JUGADOR 1 GANA EL ASALTO!"
 	else:
-		wins_p2 += 1
-		var name2 := "JUGADOR 2" if GameConfig.match_mode == "2p" else "LA IA"
-		_show_banner("¡RONDA PARA %s!" % name2, 1.9)
-	_play_sfx("bell", 0.9, -3.0)
+		score_p2 += 1
+		banner_lbl.text = "¡%s GANA EL ASALTO!" % ("JUGADOR 2" if GameConfig.match_mode == "2p" else "LA IA")
+
+	if _sfx and _sfx.has_method("play_win"):
+		_sfx.play_win()
+	phase = MatchPhase.ROUND_OVER
+	phase_timer = 2.15
+
+
+func _resolve_timeout() -> void:
+	Engine.time_scale = 1.0
+	_slowmo_timer = 0.0
+	var d1 := DojoStageScript.get_edge_ratio(Vector2(f1.position.x, f1.position.z), _stage_type)
+	var d2 := DojoStageScript.get_edge_ratio(Vector2(f2.position.x, f2.position.z), _stage_type)
+	if absf(d1 - d2) < 0.06:
+		score_p1 += 1
+		score_p2 += 1
+		banner_lbl.text = "¡TIEMPO! EMPATE TÉCNICO"
+	elif d1 < d2:
+		score_p1 += 1
+		banner_lbl.text = "¡TIEMPO! JUGADOR 1 DOMINA EL CENTRO"
+	else:
+		score_p2 += 1
+		banner_lbl.text = "¡TIEMPO! %s DOMINA EL CENTRO" % ("JUGADOR 2" if GameConfig.match_mode == "2p" else "LA IA")
+	phase = MatchPhase.ROUND_OVER
+	phase_timer = 2.0
 
 
 func _finish_match() -> void:
+	Engine.time_scale = 1.0
+	_slowmo_timer = 0.0
 	phase = MatchPhase.MATCH_OVER
-	_play_sfx("win", 1.0, -3.0)
-	var winner := "Jugador 1 (Azul)" if wins_p1 > wins_p2 else ("Jugador 2 (Coral)" if GameConfig.match_mode == "2p" else "IA (Coral)")
-	victory_title.text = "¡Victoria para %s! (%d - %d)" % [winner, wins_p1, wins_p2]
 	victory_panel.visible = true
+	if score_p1 > score_p2:
+		victory_title.text = "🏆 ¡VICTORIA DEL JUGADOR 1! (%d - %d)" % [score_p1, score_p2]
+	elif score_p2 > score_p1:
+		victory_title.text = "🏆 ¡VICTORIA DE %s! (%d - %d)" % ["JUGADOR 2" if GameConfig.match_mode == "2p" else "LA IA", score_p2, score_p1]
+	else:
+		victory_title.text = "⚖️ ¡EMPATE FINAL! (%d - %d)" % [score_p1, score_p2]
+	if _sfx and _sfx.has_method("play_win"):
+		_sfx.play_win()
 
 
-func _spawn_clash_fx(pos: Vector3, tint: Color) -> void:
-	_clash_flash.position = pos
-	_clash_flash.scale = Vector3.ONE * 0.45
-	_clash_flash.visible = true
-	_clash_timer = 0.16
-
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = tint
-	mat.emission_enabled = true
-	mat.emission = tint * 1.8
-	for i in 12:
+func _spawn_sparks(world_pos: Vector3, col: Color, count: int) -> void:
+	var smat := StandardMaterial3D.new()
+	smat.albedo_color = col
+	smat.emission_enabled = true
+	smat.emission = col * 2.2
+	var smesh := SphereMesh.new()
+	smesh.radius = 0.045
+	smesh.height = 0.09
+	for i in count:
 		var sp := MeshInstance3D.new()
-		var bm := BoxMesh.new()
-		bm.size = Vector3(0.06, 0.06, 0.16)
-		sp.mesh = bm
-		sp.material_override = mat
-		sp.position = pos
-		arena_root.add_child(sp)
-		var vel := Vector3(randf_range(-4.8, 4.8), randf_range(1.2, 5.2), randf_range(-4.8, 4.8))
-		_sparks.append({"node": sp, "vel": vel, "life": 0.36})
+		sp.mesh = smesh
+		sp.material_override = smat
+		sp.position = world_pos
+		add_child(sp)
+		var vel := Vector3(randf_range(-4.8, 4.8), randf_range(0.9, 5.2), randf_range(-4.8, 4.8))
+		_sparks.append({"node": sp, "vel": vel, "life": randf_range(0.18, 0.36)})
 
 
-func _update_clash_fx(delta: float) -> void:
-	if _clash_timer > 0.0:
-		_clash_timer -= delta
-		_clash_flash.scale += Vector3.ONE * delta * 6.5
-		if _clash_timer <= 0.0:
-			_clash_flash.visible = false
-
+func _step_sparks(delta: float) -> void:
 	for i in range(_sparks.size() - 1, -1, -1):
-		var item: Dictionary = _sparks[i]
-		var sp: MeshInstance3D = item["node"]
-		var vel: Vector3 = item["vel"]
-		vel.y -= 14.0 * delta
-		sp.position += vel * delta
-		sp.scale *= 0.94
-		item["vel"] = vel
-		item["life"] = float(item["life"]) - delta
-		if float(item["life"]) <= 0.0:
-			sp.queue_free()
+		var s := _sparks[i]
+		s["life"] -= delta
+		var n: MeshInstance3D = s["node"]
+		if s["life"] <= 0.0 or not is_instance_valid(n):
+			if is_instance_valid(n):
+				n.queue_free()
 			_sparks.remove_at(i)
+		else:
+			s["vel"].y -= 14.0 * delta
+			n.position += s["vel"] * delta
+			n.scale = Vector3.ONE * clampf(s["life"] * 4.0, 0.1, 1.0)
+
+
+func _trigger_shake(strength: float, duration: float) -> void:
+	_shake_strength = maxf(_shake_strength, strength)
+	_shake_timer = maxf(_shake_timer, duration)
 
 
 func _update_camera(delta: float) -> void:
-	_shake_amount = maxf(0.0, _shake_amount - delta * 1.5)
-	var shake_vec := Vector3(
-		randf_range(-1.0, 1.0),
-		randf_range(-1.0, 1.0),
-		0.0
-	) * _shake_amount * 0.22
+	var ripple: MeshInstance3D = _stage_refs.get("ripple_ring")
+	if ripple != null and ripple.visible:
+		ripple.scale += Vector3(4.5, 0.0, 4.5) * delta
+		if ripple.scale.x > 6.0:
+			ripple.visible = false
 
-	if GameConfig.match_mode == "1p":
-		var fwd := Vector3(f1.facing_dir.x, 0.0, f1.facing_dir.y).normalized()
-		var right := Vector3(-fwd.z, 0.0, fwd.x)
-		var base_y := maxf(f1.position.y, -0.3)
-		var desired_pos := Vector3(f1.position.x, base_y, f1.position.z) - fwd * 2.15 + right * 0.52 + Vector3(0.0, 1.72, 0.0)
-		var mid := (f1.position + f2.position) * 0.5
-		mid.y = maxf(mid.y, -0.3) + 0.98
-		cam.position = cam.position.lerp(desired_pos + shake_vec, clampf(delta * 9.0, 0.0, 1.0))
-		cam.look_at(mid, Vector3.UP)
+	var shake := Vector3.ZERO
+	if _shake_timer > 0.0:
+		shake = Vector3(
+			randf_range(-_shake_strength, _shake_strength),
+			randf_range(-_shake_strength, _shake_strength) * 0.65,
+			randf_range(-_shake_strength, _shake_strength) * 0.5
+		)
+
+	var mid := (f1.position + f2.position) * 0.5 + Vector3(0.0, 1.02, 0.0)
+	if GameConfig.match_mode == "2p" and _split_cam_p1 and _split_cam_p2:
+		_aim_fighter_camera(_split_cam_p1, f1, f2, shake, delta)
+		_aim_fighter_camera(_split_cam_p2, f2, f1, shake, delta)
 	else:
-		var mid := (f1.position + f2.position) * 0.5
-		mid.y = clampf(mid.y, -0.2, 1.0)
-		var dist := f1.position.distance_to(f2.position)
-		var target_pos := Vector3(mid.x * 0.7, 2.75, clampf(4.8 + dist * 0.45, 5.2, 7.6))
-		cam.position = cam.position.lerp(target_pos + shake_vec, clampf(delta * 6.0, 0.0, 1.0))
-		cam.look_at(Vector3(mid.x * 0.85, 0.95, 0.0), Vector3.UP)
+		var fwd_z := Vector2(f2.position.x - f1.position.x, f2.position.z - f1.position.z).normalized()
+		if fwd_z.length() < 0.05:
+			fwd_z = Vector2(0.0, -1.0)
+		var right_z := Vector2(-fwd_z.y, fwd_z.x)
+		# Crisp off-left shoulder camera so P1 sword & opponent windups are unobstructed without ghosting P1
+		var target_pos := (
+			f1.position
+			- Vector3(fwd_z.x, 0.0, fwd_z.y) * 2.55
+			- Vector3(right_z.x, 0.0, right_z.y) * 0.96
+			+ Vector3(0.0, 1.88, 0.0)
+			+ shake
+		)
+		cam.position = cam.position.lerp(target_pos, clampf(delta * 9.0, 0.0, 1.0))
+		cam.look_at(mid + Vector3(0.0, 0.14, 0.0), Vector3.UP)
+		cam.fov = lerpf(cam.fov, 50.0 - _cam_fov_punch, clampf(delta * 12.0, 0.0, 1.0))
 
 
-func _show_banner(msg: String, duration: float) -> void:
-	banner_label.text = msg
-	banner_label.visible = true
-	_banner_timer = duration
-
-
-func _update_banner(delta: float) -> void:
-	if _banner_timer > 0.0:
-		_banner_timer -= delta
-		if _banner_timer <= 0.0:
-			banner_label.visible = false
+func _aim_fighter_camera(sc: Camera3D, self_f: AvatarFighter, opp_f: AvatarFighter, shake: Vector3, delta: float) -> void:
+	var fwd_xz := Vector2(opp_f.position.x - self_f.position.x, opp_f.position.z - self_f.position.z).normalized()
+	if fwd_xz.length() < 0.05:
+		fwd_xz = self_f.facing_dir
+	var right_xz := Vector2(-fwd_xz.y, fwd_xz.x)
+	var eye_pos := (
+		self_f.position
+		- Vector3(fwd_xz.x, 0.0, fwd_xz.y) * 2.25
+		- Vector3(right_xz.x, 0.0, right_xz.y) * 0.92
+		+ Vector3(0.0, 1.82, 0.0)
+		+ shake * 0.65
+	)
+	var target := (self_f.position + opp_f.position) * 0.5 + Vector3(0.0, 1.08, 0.0)
+	if sc.position.length_squared() < 0.01:
+		sc.position = eye_pos
+	else:
+		sc.position = sc.position.lerp(eye_pos, clampf(delta * 10.0, 0.0, 1.0))
+	sc.look_at(target, Vector3.UP)
+	sc.fov = 52.0 - _cam_fov_punch * 0.65
 
 
 func _update_hud() -> void:
-	if Engine.is_editor_hint():
-		return
-	score_p1_label.text = "J1 (Azul): %s" % _dots(wins_p1)
-	var label2 := "J2 (Coral)" if GameConfig.match_mode == "2p" else "IA (Coral)"
-	score_p2_label.text = "%s: %s" % [label2, _dots(wins_p2)]
-	if phase == MatchPhase.CALIBRATE_ENTRY:
-		timer_label.text = "Ronda %d  |  Centrando..." % round_number
-	elif sudden_death:
-		timer_label.text = "Ronda %d  |  ¡MUERTE SÚBITA!" % round_number
-	else:
-		timer_label.text = "Ronda %d  |  %02d s" % [round_number, ceili(round_timer)]
+	var star := "★ "
+	var empty := "☆ "
+	score_p1_lbl.text = "J1: %s%s" % [star.repeat(score_p1), empty.repeat(maxi(0, 2 - score_p1))]
+	var p2_tag := "J2" if GameConfig.match_mode == "2p" else "IA (%s)" % GameConfig.get_ai_name()
+	score_p2_lbl.text = "%s: %s%s" % [p2_tag, star.repeat(score_p2), empty.repeat(maxi(0, 2 - score_p2))]
+	timer_lbl.text = "Ronda %d  |  %d s" % [round_number, int(ceilf(round_time))]
 
-	var guard_txt := " | GUARDIA ACTIVA" if f1.is_guarding else (" | AUTOBLOQUEO LISTO" if f1.auto_guard_ready else "")
-	var charge_txt := " | 🔥 CARGADA" if f1.is_charged else ""
-	p1_status_label.text = "J1: %s | Hoja: %.0f°%s%s" % [
-		MotionHub.slots[0].device_name,
-		rad_to_deg(f1.blade_roll_rad),
-		guard_txt,
-		charge_txt
-	]
-	if GameConfig.match_mode == "2p":
-		p2_status_label.text = "J2: %s | Hoja: %.0f°%s" % [
-			MotionHub.slots[1].device_name,
-			rad_to_deg(f2.blade_roll_rad),
-			" | BLOQUEANDO" if f2.is_guarding else ""
+	if _hub != null:
+		var s0 = _hub.slots[0]
+		var state0 := "⚡ ESPADA MAESTRA!" if f1.spirit >= 100.0 else ("🌟 CONTRAATAQUE!" if f1.is_charged else ("🛡️ BLOQUEO" if f1.is_guarding else "Listo"))
+		status_p1_lbl.text = "J1 [%s] | %s | Guardia %d%% | Esp %d%%" % [
+			s0.device_name, state0, int(roundf(f1.guard_meter)), int(roundf(f1.spirit))
 		]
-	else:
-		p2_status_label.text = "IA (%s) | Hoja: %.0f°%s" % [
-			["Novato", "Pro", "Campeón"][GameConfig.ai_difficulty],
-			rad_to_deg(f2.blade_roll_rad),
-			" | PREPARANDO CORTE" if f2.state == AvatarFighter.State.WINDUP else ""
-		]
-
-	reticle_hud.visible = false
-	ring_bar.queue_redraw()
+		if GameConfig.match_mode == "2p":
+			var s1 = _hub.slots[1]
+			var state1 := "⚡ ESPADA MAESTRA!" if f2.spirit >= 100.0 else ("🛡️ BLOQUEO" if f2.is_guarding else "Listo")
+			status_p2_lbl.text = "J2 [%s] | %s | Guardia %d%% | Esp %d%%" % [
+				s1.device_name, state1, int(roundf(f2.guard_meter)), int(roundf(f2.spirit))
+			]
+		else:
+			var ai_state := "¡ATURDIDA!" if f2.state == AvatarFighter.State.STUNNED else ("⚠️ ¡CARGANDO!" if f2.state == AvatarFighter.State.WINDUP else ("Espíritu %d%%" % int(roundf(f2.spirit))))
+			status_p2_lbl.text = "IA %s | Guardia %d%% | %s" % [GameConfig.get_ai_name(), int(roundf(f2.guard_meter)), ai_state]
 
 
 func _on_draw_ring_bar() -> void:
 	var w := ring_bar.size.x
 	var h := ring_bar.size.y
-	if w < 40.0:
+	if w <= 20.0:
 		return
-	var cx := w * 0.5
-	var bar_h := 12.0
-	var y0 := (h - bar_h) * 0.5
-	var half_w := cx - 54.0
+	var pad := 16.0
+	var bw := w - pad * 2.0
+	ring_bar.draw_rect(Rect2(pad, h * 0.5 - 5.0, bw, 10.0), Color(0.14, 0.22, 0.34, 0.92), true)
+	ring_bar.draw_rect(Rect2(pad, h * 0.5 - 5.0, bw, 10.0), Color(0.95, 0.85, 0.55, 0.75), false, 2.0)
+	ring_bar.draw_line(Vector2(w * 0.5, 2.0), Vector2(w * 0.5, h - 2.0), Color(1, 1, 1, 0.45), 2.0)
 
-	# Track background
-	ring_bar.draw_rect(Rect2(54.0, y0, half_w * 2.0, bar_h), Color(0.08, 0.14, 0.26, 0.85), true)
-	# Center divider
-	ring_bar.draw_line(Vector2(cx, y0 - 3.0), Vector2(cx, y0 + bar_h + 3.0), Color(1.0, 1.0, 1.0, 0.7), 2.0)
+	# Map ring position cleanly along arena fight axis (-Z opponent side vs +Z P1 side)
+	var ratio_p1 := clampf(f1.position.z / 3.55, -0.95, 0.95)
+	var ratio_p2 := clampf(f2.position.z / 3.55, -0.95, 0.95)
+	if _stage_type == GameConfig.ArenaStage.VOLCANIC_BRIDGE:
+		ratio_p1 = clampf(f1.position.z / 4.35, -0.95, 0.95)
+		ratio_p2 = clampf(f2.position.z / 4.35, -0.95, 0.95)
 
-	var d1 := clampf(Vector2(f1.position.x, f1.position.z).length() / AvatarFighter.PLATFORM_RADIUS, 0.0, 1.0)
-	var d2 := clampf(Vector2(f2.position.x, f2.position.z).length() / AvatarFighter.PLATFORM_RADIUS, 0.0, 1.0)
-
-	var c1 := Color(0.98, 0.35, 0.25) if d1 > 0.72 else Color(0.10, 0.82, 0.96)
-	var c2 := Color(0.98, 0.35, 0.25) if d2 > 0.72 else Color(0.98, 0.45, 0.55)
-
-	ring_bar.draw_rect(Rect2(cx - half_w * d1, y0 + 2.0, half_w * d1, bar_h - 4.0), c1, true)
-	ring_bar.draw_rect(Rect2(cx, y0 + 2.0, half_w * d2, bar_h - 4.0), c2, true)
-
-	var font := ThemeDB.fallback_font
-	ring_bar.draw_string(font, Vector2(6.0, y0 + bar_h - 1.0), "AGUA J1", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.55, 0.88, 1.0))
-	ring_bar.draw_string(font, Vector2(w - 50.0, y0 + bar_h - 1.0), "AGUA IA", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.65, 0.72))
+	var p1_x := w * 0.5 - ratio_p1 * (bw * 0.46)
+	var p2_x := w * 0.5 - ratio_p2 * (bw * 0.46)
+	ring_bar.draw_circle(Vector2(p2_x, h * 0.5), 8.5, Color(0.98, 0.34, 0.22))
+	ring_bar.draw_circle(Vector2(p1_x, h * 0.5), 8.5, Color(0.06, 0.82, 0.98))
 
 
-func _project_world_axis_2d(world_axis: Vector3) -> Vector2:
-	var cam_right := cam.global_transform.basis.x
-	var cam_up := cam.global_transform.basis.y
-	var p := Vector2(world_axis.dot(cam_right), -world_axis.dot(cam_up))
-	if p.length() < 0.05:
-		return Vector2(0.0, -1.0)
-	return p.normalized()
+func _project_world_axis_2d(world_axis: Vector3, origin_world: Vector3) -> Vector2:
+	var active_cam := _split_cam_p1 if (_split_cam_p1 != null and GameConfig.match_mode == "2p") else cam
+	var p0 := active_cam.unproject_position(origin_world)
+	var p1 := active_cam.unproject_position(origin_world + world_axis)
+	var d := p1 - p0
+	return d.normalized() if d.length() > 0.001 else Vector2.UP
 
 
 func _on_draw_reticle() -> void:
-	var w := reticle_hud.size.x
-	var h := reticle_hud.size.y
-	var center := Vector2(w * 0.5, 52.0)
-	var rad := 40.0
-	var font := ThemeDB.fallback_font
+	var incoming := (f2.state == AvatarFighter.State.WINDUP or f2.state == AvatarFighter.State.SLASHING) and GameConfig.match_mode == "1p"
+	if phase != MatchPhase.FIGHTING or not incoming:
+		return
 
-	var incoming := (f2.state == AvatarFighter.State.WINDUP or f2.state == AvatarFighter.State.SLASHING)
-	var p1_axis := f1.get_world_blade_axis()
-	var p1_2d := _project_world_axis_2d(p1_axis)
+	var size := reticle_hud.size
+	var cx := Vector2(size.x * 0.5, size.y * 0.52)
+	var mid := (f1.position + f2.position) * 0.5 + Vector3(0.0, 1.0, 0.0)
 
-	var ring_color := Color(0.35, 0.78, 0.96, 0.48)
-	var status_text := "🛡️ GUARDIA ACTIVA" if f1.is_guarding else "⚔️ ESPADA CENTRADA"
-	var status_color := Color(0.68, 0.92, 1.0)
-	if f2.state == AvatarFighter.State.STUNNED:
-		status_text = "⚡ ¡ATURDIDO! ¡CORTA!"
-		status_color = Color(1.0, 0.90, 0.25)
-		ring_color = Color(1.0, 0.88, 0.25, 0.85)
-	elif f1.is_charged:
-		status_text = "🔥 ¡ESPADA CARGADA!"
-		status_color = Color(1.0, 0.82, 0.28)
-		ring_color = Color(1.0, 0.78, 0.22, 0.85)
+	# Translucent backdrop badge only when threat arrives
+	reticle_hud.draw_circle(cx, 54.0, Color(0.04, 0.09, 0.17, 0.72))
 
-	var p1_line_color := Color(1.0, 0.86, 0.30) if f1.is_charged else Color(0.18, 0.88, 1.0)
+	var b1 := _project_world_axis_2d(f1.get_world_blade_axis(), mid) * 40.0
+	var guard_col := Color(0.20, 0.88, 1.0) if f1.is_guarding else Color(0.45, 0.92, 0.72, 0.75)
+	reticle_hud.draw_line(cx - b1, cx + b1, guard_col, 7.0 if f1.is_guarding else 4.5, true)
 
-	if incoming:
-		var atk_axis := f2.get_world_slash_axis(f2.windup_slash_dir)
-		var atk_2d := _project_world_axis_2d(atk_axis)
-		var ideal_2d := Vector2(-atk_2d.y, atk_2d.x)
-		var align := absf(atk_axis.dot(p1_axis))
-		var ok_active := f1.is_guarding and align < 0.62
-		var ok_auto := f1.auto_guard_ready
-
-		# Ideal perpendicular green target line
-		reticle_hud.draw_circle(center, rad + 4.0, Color(0.03, 0.08, 0.16, 0.68))
-		reticle_hud.draw_line(center - ideal_2d * (rad - 6.0), center + ideal_2d * (rad - 6.0), Color(0.2, 0.95, 0.45, 0.45), 6.0)
-		# Incoming red attack line
-		reticle_hud.draw_line(center - atk_2d * (rad + 4.0), center + atk_2d * (rad + 4.0), Color(1.0, 0.30, 0.25, 0.95), 5.0)
-
-		if ok_active or ok_auto:
-			ring_color = Color(0.22, 0.96, 0.52, 0.95)
-			p1_line_color = Color(0.45, 1.0, 0.72)
-			status_text = "¡BLOQUEO LISTO!" if ok_active else "⚡ ¡AUTOBLOQUEO LISTO!"
-			status_color = Color(0.38, 1.0, 0.64)
-		else:
-			ring_color = Color(1.0, 0.38, 0.28, 0.92)
-			status_text = "¡GIRA PERPENDICULAR!"
-			status_color = Color(1.0, 0.75, 0.45)
+	if f2.state == AvatarFighter.State.WINDUP and f2.windup_attack_type == AvatarFighter.AttackType.THRUST:
+		reticle_hud.draw_circle(cx, 26.0, Color(1.0, 0.35, 0.15, 0.9), false, 4.0)
+		reticle_hud.draw_string(ThemeDB.fallback_font, Vector2(18, 22), "¡ESTOCADA! ESQUIVA / PARRY", HORIZONTAL_ALIGNMENT_CENTER, size.x - 36, 13, Color(1.0, 0.82, 0.3))
 	else:
-		reticle_hud.draw_circle(center, rad, Color(0.03, 0.08, 0.16, 0.55))
-
-	reticle_hud.draw_arc(center, rad, 0.0, TAU, 40, ring_color, 3.0)
-	# Player 1 sword line
-	reticle_hud.draw_line(center - p1_2d * (rad - 8.0), center + p1_2d * (rad - 8.0), p1_line_color, 5.0, true)
-	reticle_hud.draw_circle(center + p1_2d * (rad - 10.0), 4.0, Color.WHITE)
-	reticle_hud.draw_string(font, Vector2(0.0, h - 10.0), status_text, HORIZONTAL_ALIGNMENT_CENTER, w, 15, status_color)
-
-
-func _dots(wins: int) -> String:
-	var out := ""
-	for i in MAX_WINS:
-		out += "★ " if i < wins else "☆ "
-	return out.strip_edges()
-
-
-func _play_sfx(sound_name: String, pitch: float, volume_db: float) -> void:
-	var sfx := get_node_or_null("/root/SoundFX")
-	if sfx != null:
-		sfx.play(sound_name, pitch, volume_db)
-
-
-func _on_calib_confirm_pressed() -> void:
-	confirm_entry_calibration()
+		var sdir := f2.windup_slash_dir if f2.state == AvatarFighter.State.WINDUP else f2.active_slash_dir
+		var s_axis := f2.get_world_slash_axis(sdir)
+		var b2 := _project_world_axis_2d(s_axis, mid) * 44.0
+		var dot := absf(f1.get_world_blade_axis().dot(s_axis))
+		var aligned := dot <= 0.62
+		var threat_col := Color(0.28, 1.0, 0.55) if aligned else Color(1.0, 0.30, 0.22)
+		reticle_hud.draw_line(cx - b2, cx + b2, threat_col, 4.5, true)
+		var hint := "CRUZARÁ ✓ Pulsa Guardia!" if aligned else "GIRA TU ESPADA EN CRUZ ✕"
+		reticle_hud.draw_string(ThemeDB.fallback_font, Vector2(10, 22), hint, HORIZONTAL_ALIGNMENT_CENTER, size.x - 20, 12, threat_col)
 
 
 func _on_recenter_p1_pressed() -> void:
-	MotionHub.recenter_slot(0)
-	_play_sfx("bell", 1.2, -8.0)
+	if _hub != null:
+		_hub.recenter_slot(0)
 
 
 func _on_recenter_p2_pressed() -> void:
-	MotionHub.recenter_slot(1)
-	_play_sfx("bell", 1.3, -8.0)
+	if _hub != null:
+		_hub.recenter_slot(1)
+
+
+func _on_calib_confirm_pressed() -> void:
+	_complete_entry_calibration()
+
+
+func _on_rematch_pressed() -> void:
+	Engine.time_scale = 1.0
+	begin_entry_calibration(false)
 
 
 func _on_guide_pressed() -> void:
+	Engine.time_scale = 1.0
 	get_tree().change_scene_to_file("res://scenes/CalibrationRoom.tscn")
 
 
 func _on_menu_pressed() -> void:
+	Engine.time_scale = 1.0
 	get_tree().change_scene_to_file("res://scenes/MainMenu.tscn")
-
-
-func _on_rematch_pressed() -> void:
-	wins_p1 = 0
-	wins_p2 = 0
-	round_number = 1
-	victory_panel.visible = false
-	_start_round()

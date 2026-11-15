@@ -2,25 +2,30 @@
 
 > ⚠️ **AVISO:** Este repositorio es una **PRUEBA / PROTOTIPO EXPERIMENTAL** en desarrollo temprano. Las mecánicas, controles de movimiento y gráficos están en fase de testeo y ajuste continuo.
 
-Prototipo experimental en **Godot Engine 4.7** inspirado en **Nintendo Switch Sports** y **Wii Sports Resort**, centrado inicialmente en el minijuego **Chambara (Duelo de Espadas)** con soporte para sensores de movimiento (**Six-Axis / Giroscopio**).
+Prototipo experimental en **Godot Engine 4.7** inspirado en **Nintendo Switch Sports** y **Wii Sports Resort**, centrado en **Chambara (Duelo de Espadas 3D)** con fusión 3D de giroscopio en tiempo real y mando móvil inalámbrico.
 
 ---
 
-## ✨ Qué incluye esta prueba
+## ✨ Qué incluye esta prueba (Enfoque Renovado)
 
-- **Entorno 3D completo (Menú principal 3D + Arena 3D + Sala 3D)**:
-  - Menú principal en **3D en vivo** donde ves a los luchadores sobre la isla y pruebas tu espada en tiempo real.
-  - Combate sobre **plataforma circular 360° en 3D** con movimiento lateral/profundidad (WASD / stick) y cámara orbital automática tras el hombro.
-- **Modo Chambara 3D (1P vs IA y 2P Local)**:
-  - Espada en 3D con inclinación, orientación espacial y avance automático al empujar al rival.
-  - Cortes alineados al ángulo de la espada (`0°`, `±45°`, `±90°`).
-  - Bloqueo perpendicular con aturdimiento y carga de contraataque, choque de espadas, guardia superada paralela y combo multi-golpe.
-  - Tres niveles de dificultad de IA (`Novato`, `Pro`, `Campeón`).
-- **Controles de movimiento y periféricos**:
-  - **Móvil por Wi-Fi (`HTTPS + WebSocket` en el puerto `8443`)**: convierte cualquier smartphone con navegador y giroscopio en un mando inalámbrico desde `web/mobile_controller.html`.
-  - **Mandos con giroscopio / Gamepad** y **modo Ratón + Teclado** para pruebas rápidas sin sensor.
+- **Detección Física Realista 1:1 (`MotionFusion` + `MotionHub`)**:
+  - Seguimiento completo por **cuaterniones 3D** con corrección de horizonte sin bloqueo angular cuando sujetas el móvil inclinado (~45°–75°).
+  - Cálculo de velocidad en la **punta de la espada** (`ω × punta`): girar la muñeca para orientar la hoja produce cero ataques falsos, mientras que un látigo rápido dispara el tajo de inmediato.
+  - Combos en vaivén al cambiar dirección sin esperar a detener la mano, captura de picos de giro entre paquetes WebSocket (`60Hz+`) y detección de **Estocada frontal**.
+- **Combate Táctico en 3D**:
+  - **Guardia Activa vs. Parry Perfecto**: pulsa Guardia en cruz perpendicular al golpe en `< 0.22s` para activar cámara lenta (`0.25x`), aturdir al rival `1.65s` y cargar contraataque.
+  - **Medidor de Guardia y Rotura**: los golpes paralelos desgastan y rompen la postura del defensor.
+  - **Estocada** (perfora guardia estática), **Esquiva lateral con invulnerabilidad** (`i-frames`) y **Onda de Espada Maestra** al completar el 100% de Espíritu.
+  - Dos estilos de combate (`Chambara Clásico` y `Espadas Gemelas`) y cuatro niveles de IA (`Novato`, `Pro`, `Campeón`, `Leyenda`).
+- **3 Escenarios 3D + Pantalla Dividida 2P**:
+  - **Isla del Sol**, **Puente Volcánico** y **Santuario Flotante** (con balanceo dinámico e shader animado de agua/lava/cielo).
+  - Cámara dividida automática para **2 Jugadores Locales** con mando o móvil.
+- **Dojo de Práctica 3D Interactivo (`CalibrationRoom.tscn`)**:
+  - Entrenamiento paso a paso en vivo junto a un **Muñeco de Entrenamiento 3D** que cambia ángulos de guardia y reacciona en tiempo real a cortes, estocadas y roturas.
+- **Mando Móvil por Wi-Fi (`HTTPS + WebSocket` puerto `8443`, `web/mobile_controller.html`)**:
+  - Modos **2 Manos** (joystick táctil + deslizar para esquivar + botón de guardia) y **1 Mano**, soporte iOS/Android (`Chrome` / `Samsung Internet` / `Safari`), dial en vivo sincronizado desde Godot y botones de `Estocada` y `Esquiva`.
 - **Pruebas automáticas headless**:
-  - Batería de verificación en `tests/SmokeTest.tscn` (`tests/smoke_test.gd`).
+  - Batería completa en [`tests/SmokeTest.tscn`](tests/SmokeTest.tscn) ([`tests/smoke_test.gd`](tests/smoke_test.gd)).
 
 ---
 
@@ -29,5 +34,5 @@ Prototipo experimental en **Godot Engine 4.7** inspirado en **Nintendo Switch Sp
 1. Tener instalado **Godot Engine 4.7+** (por ejemplo, `Godot_v4.7.2-stable_win64.exe`).
 2. Abrir `project.godot` desde Godot (o en Windows ajustar la ruta en `Jugar_SportPC.bat` / `Abrir_Editor_Godot.bat`).
 3. Para usar el **móvil como mando**:
-   - Inicia el juego primero en el PC para activar el servidor local en el puerto `8443`.
-   - Conecta el móvil a la misma red Wi-Fi y entra a la URL `https://<IP-de-tu-PC>:8443` mostrada en pantalla (aceptando el certificado autofirmado local).
+   - Inicia el juego en el PC para activar el servidor local en el puerto `8443`.
+   - Conecta el móvil a la misma red Wi-Fi, abre `https://<IP-de-tu-PC>:8443`, acepta el certificado local y pulsa **Activar Sensores**.

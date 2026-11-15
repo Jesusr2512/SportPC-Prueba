@@ -2,6 +2,7 @@
 extends Node3D
 
 const AVATAR_SCENE := preload("res://scenes/AvatarFighter.tscn")
+const DojoStageScript := preload("res://scripts/game/DojoStage.gd")
 
 @onready var cam: Camera3D = $Camera3D
 @onready var preview_world: Node3D = $PreviewWorld
@@ -15,11 +16,15 @@ const AVATAR_SCENE := preload("res://scenes/AvatarFighter.tscn")
 @onready var url_label: Label = $UI/Margin/Root/MobileCard/HBox/UrlLabel
 @onready var device_picker_p1: OptionButton = $UI/Margin/Root/ControllersCard/Grid/P1Select
 @onready var device_picker_p2: OptionButton = $UI/Margin/Root/ControllersCard/Grid/P2Select
+@onready var stage_picker: OptionButton = $UI/Margin/Root/ActionsCard/RowOptions/StageSelect
+@onready var style_picker: OptionButton = $UI/Margin/Root/ActionsCard/RowOptions/StyleSelect
 @onready var ai_picker: OptionButton = $UI/Margin/Root/ActionsCard/RowAI/AiDifficulty
 
+var _stage_refs: Dictionary = {}
 var _preview_f1: AvatarFighter
 var _preview_f2: AvatarFighter
 var _cam_angle: float = 0.0
+var _shader_time: float = 0.0
 
 
 func _ready() -> void:
@@ -29,112 +34,53 @@ func _ready() -> void:
 		return
 
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	MotionHub.slots_changed.connect(_refresh_devices)
+	Engine.time_scale = 1.0
+	var hub := get_node_or_null("/root/MotionHub")
+	if hub != null:
+		hub.mouse_combat_enabled = false
+		hub.slots_changed.connect(_refresh_devices)
+		hub.recenter_slot(0)
 
 	ai_picker.clear()
 	ai_picker.add_item("IA: Novato", 0)
 	ai_picker.add_item("IA: Pro", 1)
 	ai_picker.add_item("IA: Campeón", 2)
-	ai_picker.selected = GameConfig.ai_difficulty
+	ai_picker.add_item("IA: Leyenda", 3)
+	ai_picker.selected = clampi(GameConfig.ai_difficulty, 0, 3)
+
+	stage_picker.clear()
+	stage_picker.add_item("Arena: Isla del Sol", GameConfig.ArenaStage.SUN_ISLAND)
+	stage_picker.add_item("Arena: Puente Volcánico", GameConfig.ArenaStage.VOLCANIC_BRIDGE)
+	stage_picker.add_item("Arena: Santuario Flotante", GameConfig.ArenaStage.SKY_SANCTUARY)
+	stage_picker.selected = clampi(GameConfig.arena_stage, 0, 2)
+
+	style_picker.clear()
+	style_picker.add_item("Estilo: Chambara Clásico", GameConfig.CombatStyle.CLASSIC)
+	style_picker.add_item("Estilo: Espadas Gemelas", GameConfig.CombatStyle.TWIN_BLADES)
+	style_picker.selected = clampi(GameConfig.combat_style, 0, 1)
 
 	_refresh_devices()
 	_refresh_url()
-	MotionHub.recenter_slot(0)
 
 
 func _build_3d_preview_stage() -> void:
-	for ch in preview_world.get_children():
-		ch.free()
+	_stage_refs = DojoStageScript.build_stage(preview_world, GameConfig.arena_stage, 3.55)
 
-	# Ocean water
-	var water := MeshInstance3D.new()
-	var wm := PlaneMesh.new()
-	wm.size = Vector2(160.0, 160.0)
-	water.mesh = wm
-	var wmat := StandardMaterial3D.new()
-	wmat.albedo_color = Color(0.06, 0.56, 0.84)
-	wmat.roughness = 0.14
-	wmat.metallic = 0.1
-	water.material_override = wmat
-	water.position = Vector3(0.0, -1.35, 0.0)
-	preview_world.add_child(water)
-
-	# Stone foundation
-	var base := MeshInstance3D.new()
-	var bm := CylinderMesh.new()
-	bm.top_radius = 3.65
-	bm.bottom_radius = 3.2
-	bm.height = 1.35
-	bm.radial_segments = 48
-	base.mesh = bm
-	var bmat := StandardMaterial3D.new()
-	bmat.albedo_color = Color(0.32, 0.36, 0.44)
-	bmat.roughness = 0.85
-	base.material_override = bmat
-	base.position = Vector3(0.0, -0.72, 0.0)
-	preview_world.add_child(base)
-
-	# Wooden circular dojo deck
-	var plat := MeshInstance3D.new()
-	var pm := CylinderMesh.new()
-	pm.top_radius = 3.55
-	pm.bottom_radius = 3.55
-	pm.height = 0.16
-	pm.radial_segments = 48
-	plat.mesh = pm
-	var pmat := StandardMaterial3D.new()
-	pmat.albedo_color = Color(0.89, 0.78, 0.60)
-	pmat.roughness = 0.52
-	plat.material_override = pmat
-	plat.position = Vector3(0.0, -0.08, 0.0)
-	preview_world.add_child(plat)
-
-	# Outer rim
-	var rim := MeshInstance3D.new()
-	var rm := TorusMesh.new()
-	rm.inner_radius = 3.25
-	rm.outer_radius = 3.55
-	rm.rings = 48
-	rim.mesh = rm
-	var rmat := StandardMaterial3D.new()
-	rmat.albedo_color = Color(0.12, 0.74, 0.92)
-	rmat.emission_enabled = true
-	rmat.emission = Color(0.12, 0.74, 0.92) * 0.3
-	rim.material_override = rmat
-	rim.rotation_degrees = Vector3(90, 0, 0)
-	rim.scale = Vector3(1.0, 1.0, 0.18)
-	rim.position = Vector3(0.0, 0.015, 0.0)
-	preview_world.add_child(rim)
-
-	# Distant island silhouettes
-	var island_mat := StandardMaterial3D.new()
-	island_mat.albedo_color = Color(0.24, 0.52, 0.44)
-	for info in [
-		[Vector3(-16.0, -0.9, -24.0), Vector3(10.0, 4.2, 8.5)],
-		[Vector3(20.0, -1.0, -28.0), Vector3(13.0, 5.5, 11.0)],
-		[Vector3(2.0, -1.1, -38.0), Vector3(18.0, 6.8, 9.0)]
-	]:
-		var isl := MeshInstance3D.new()
-		var im := SphereMesh.new()
-		im.radius = 1.0
-		im.height = 1.4
-		isl.mesh = im
-		isl.material_override = island_mat
-		isl.position = info[0]
-		isl.scale = info[1]
-		preview_world.add_child(isl)
-
-	# Live 3D fighter diorama
+	var use_twins := GameConfig.combat_style == GameConfig.CombatStyle.TWIN_BLADES
 	_preview_f1 = AVATAR_SCENE.instantiate() as AvatarFighter
 	_preview_f1.fighter_name = "Jugador 1"
 	_preview_f1.team_color = Color(0.05, 0.78, 0.92)
 	preview_world.add_child(_preview_f1)
+	_preview_f1.configure_stage(GameConfig.arena_stage, 3.55)
+	_preview_f1.set_twin_blades(use_twins)
 	_preview_f1.reset_for_round(Vector3(0.0, 0.0, 0.85), Vector2(0.0, -1.0))
 
 	_preview_f2 = AVATAR_SCENE.instantiate() as AvatarFighter
 	_preview_f2.fighter_name = "IA"
 	_preview_f2.team_color = Color(0.98, 0.44, 0.52)
 	preview_world.add_child(_preview_f2)
+	_preview_f2.configure_stage(GameConfig.arena_stage, 3.55)
+	_preview_f2.set_twin_blades(use_twins)
 	_preview_f2.reset_for_round(Vector3(0.0, 0.0, -0.85), Vector2(0.0, 1.0))
 
 
@@ -175,6 +121,11 @@ func _process(delta: float) -> void:
 	if Engine.is_editor_hint():
 		return
 
+	_shader_time += delta
+	var wmat: ShaderMaterial = _stage_refs.get("water_mat")
+	if wmat != null:
+		wmat.set_shader_parameter("u_time", _shader_time)
+
 	_cam_angle += delta * 0.22
 	var cam_radius := 4.1
 	cam.position = Vector3(sin(_cam_angle) * cam_radius, 2.0, cos(_cam_angle) * cam_radius)
@@ -185,12 +136,12 @@ func _process(delta: float) -> void:
 		_preview_f1.blade_orientation = s1.fusion.orientation
 		_preview_f1.blade_roll_rad = s1.fusion.get_snapped_blade_roll_rad()
 		_preview_f1.is_guarding = s1.is_guarding
-		if _preview_f1.state == AvatarFighter.State.NORMAL and s1.fusion.just_swung:
-			_preview_f1.trigger_slash(s1.fusion.last_slash_dir, s1.fusion.last_slash_power)
+		if _preview_f1.state == AvatarFighter.State.NORMAL and s1.fusion.just_swung and s1.source_type != MotionHub.SourceType.MOUSE:
+			_preview_f1.trigger_slash(s1.fusion.last_slash_dir, s1.fusion.last_slash_power, s1.fusion.last_slash_type)
 		_preview_f1.step_fighter(delta, s1.move_axis, _preview_f2.position, true)
 		var p1_xz := Vector2(_preview_f1.position.x, _preview_f1.position.z)
-		if p1_xz.length() > 2.4:
-			p1_xz = p1_xz.normalized() * 2.4
+		if p1_xz.length() > 2.2:
+			p1_xz = p1_xz.normalized() * 2.2
 			_preview_f1.position.x = p1_xz.x
 			_preview_f1.position.z = p1_xz.y
 
@@ -241,6 +192,9 @@ func _populate_picker(picker: OptionButton, slot_idx: int) -> void:
 	for gp in MotionHub.get_available_gamepads():
 		var tag := " (6-Axis)" if gp["motion"] else " (Sin Gyro)"
 		picker.add_item("Mando #%d: %s%s" % [gp["id"], gp["name"], tag], gp["id"])
+	if MotionHub.has_method("get_connected_mobile_peers"):
+		for pid in MotionHub.get_connected_mobile_peers():
+			picker.add_item("Móvil Wi-Fi #%d (6-Axis)" % pid, 1000 + pid)
 	picker.selected = 0
 	picker.set_meta("slot_idx", slot_idx)
 
@@ -257,8 +211,23 @@ func _apply_picker(picker: OptionButton, index: int, slot_idx: int) -> void:
 	var id := picker.get_item_id(index)
 	if id == -1:
 		MotionHub.assign_mouse(slot_idx)
+	elif id >= 1000 and MotionHub.has_method("assign_mobile"):
+		MotionHub.assign_mobile(slot_idx, id - 1000)
 	elif id >= 0:
 		MotionHub.assign_gamepad(slot_idx, id)
+
+
+func _on_stage_select_item_selected(index: int) -> void:
+	GameConfig.arena_stage = stage_picker.get_item_id(index)
+	_build_3d_preview_stage()
+
+
+func _on_style_select_item_selected(index: int) -> void:
+	GameConfig.combat_style = style_picker.get_item_id(index)
+	if _preview_f1 and _preview_f2:
+		var use_twins := GameConfig.combat_style == GameConfig.CombatStyle.TWIN_BLADES
+		_preview_f1.set_twin_blades(use_twins)
+		_preview_f2.set_twin_blades(use_twins)
 
 
 func _on_copy_url_pressed() -> void:
@@ -274,7 +243,7 @@ func _on_btn_calibration_pressed() -> void:
 
 func _on_btn_chambara_1p_pressed() -> void:
 	GameConfig.match_mode = "1p"
-	GameConfig.ai_difficulty = ai_picker.selected
+	GameConfig.ai_difficulty = ai_picker.get_item_id(ai_picker.selected)
 	var sfx := get_node_or_null("/root/SoundFX")
 	if sfx != null:
 		sfx.play("bell", 1.0, -6.0)

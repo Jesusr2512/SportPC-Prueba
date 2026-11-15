@@ -133,9 +133,23 @@ theme_override_constants/separation = 12
 
 [node name="BtnCalibration" type="Button" parent="UI/Margin/Root/ActionsCard"]
 layout_mode = 2
-custom_minimum_size = Vector2(0, 56)
-theme_override_font_sizes/font_size = 20
-text = "1. Cómo Jugar — Animación 3D de Postura y Gestos (Probar Ataque)"
+custom_minimum_size = Vector2(0, 54)
+theme_override_font_sizes/font_size = 19
+text = "1. Dojo de Práctica 3D y Cómo Jugar (Muñeco Interactivo)"
+
+[node name="RowOptions" type="HBoxContainer" parent="UI/Margin/Root/ActionsCard"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="StageSelect" type="OptionButton" parent="UI/Margin/Root/ActionsCard/RowOptions"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 46)
+
+[node name="StyleSelect" type="OptionButton" parent="UI/Margin/Root/ActionsCard/RowOptions"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 46)
 
 [node name="RowAI" type="HBoxContainer" parent="UI/Margin/Root/ActionsCard"]
 layout_mode = 2
@@ -171,5 +185,7 @@ text = "Tip móvil: acepta el aviso de certificado local al entrar por HTTPS par
 [connection signal="item_selected" from="UI/Margin/Root/ControllersCard/Grid/P1Select" to="." method="_on_p1_select_item_selected"]
 [connection signal="item_selected" from="UI/Margin/Root/ControllersCard/Grid/P2Select" to="." method="_on_p2_select_item_selected"]
 [connection signal="pressed" from="UI/Margin/Root/ActionsCard/BtnCalibration" to="." method="_on_btn_calibration_pressed"]
+[connection signal="item_selected" from="UI/Margin/Root/ActionsCard/RowOptions/StageSelect" to="." method="_on_stage_select_item_selected"]
+[connection signal="item_selected" from="UI/Margin/Root/ActionsCard/RowOptions/StyleSelect" to="." method="_on_style_select_item_selected"]
 [connection signal="pressed" from="UI/Margin/Root/ActionsCard/RowAI/BtnChambara1P" to="." method="_on_btn_chambara_1p_pressed"]
 [connection signal="pressed" from="UI/Margin/Root/ActionsCard/BtnChambara2P" to="." method="_on_btn_chambara_2p_pressed"]

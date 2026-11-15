@@ -1,13 +1,15 @@
 class_name MotionFusion
 extends RefCounted
 
+enum SlashType { CUT = 0, THRUST = 1 }
+
 const GYRO_DEADZONE := 0.04
-const SWING_THRESHOLD := 2.85
-const SWING_COOLDOWN := 0.15
-const STEADY_THRESHOLD := 2.0
-const BIAS_ALPHA := 0.06
-const GRAVITY_BLEND := 0.07
-const YAW_SPRING_STILL := 0.90
+const SWING_THRESHOLD := 3.25
+const SWING_PRIMED_THRESHOLD := 2.55
+const COMBO_THRESHOLD := 2.85
+const SWING_REFRACTORY := 0.115
+const THRUST_ACCEL_THRESHOLD := 6.2
+const STEADY_THRESHOLD := 2.1
 
 var raw_orientation: Quaternion = Quaternion.IDENTITY
 var recenter_offset: Quaternion = Quaternion.IDENTITY
@@ -26,6 +28,8 @@ var blade_roll_rad: float = 0.0
 var snapped_blade_roll_rad: float = 0.0
 
 var angular_speed: float = 0.0
+var tip_vel: Vector2 = Vector2.ZERO
+var tip_speed: float = 0.0
 var dynamic_accel_mag: float = 0.0
 var motion_energy: float = 0.0
 var is_steady: bool = true
@@ -33,60 +37,85 @@ var has_centered_once: bool = false
 var swing_cooldown_timer: float = 0.0
 var last_slash_dir: Vector2 = Vector2.RIGHT
 var last_slash_power: float = 0.0
+var last_slash_type: int = SlashType.CUT
 var last_swing_source: String = ""
 var just_swung: bool = false
 
-var _ref_gravity: Vector3 = Vector3(0.0, -1.0, 0.0)
+# Live speed streaming up to impact frame so full arm acceleration registers even after early threshold crossing
+var active_peak_speed: float = 0.0
+
+var _level_q: Quaternion = Quaternion.IDENTITY
 var _prev_accel: Vector3 = Vector3(0.0, -9.81, 0.0)
 var _lp_accel: Vector3 = Vector3.ZERO
 var _bias_samples_left: int = 0
 var _bias_accum: Vector3 = Vector3.ZERO
 var _bias_count: int = 0
-var _swing_armed: bool = true
-var _peak_gyro: Vector3 = Vector3.ZERO
-var _peak_dyn_accel: float = 0.0
-var _peak_timer: float = 0.0
+
+var _refract_timer: float = 0.0
+var _same_dir_rearmed: bool = true
+var _last_strike_dir: Vector2 = Vector2.RIGHT
+var _reversal_travel: float = 0.0
+var _backswing_dir: Vector2 = Vector2.ZERO
+var _backswing_timer: float = 0.0
+var _thrust_rearmed: bool = true
 
 
 func reset_pose() -> void:
 	raw_orientation = Quaternion.IDENTITY
 	recenter_offset = Quaternion.IDENTITY
 	orientation = Quaternion.IDENTITY
+	_level_q = Quaternion.IDENTITY
 	pitch_rad = 0.0
 	yaw_rad = 0.0
 	roll_rad = 0.0
 	blade_roll_rad = 0.0
 	snapped_blade_roll_rad = 0.0
-	_ref_gravity = Vector3(0.0, -1.0, 0.0)
 	_prev_accel = Vector3(0.0, -9.81, 0.0)
 	_lp_accel = Vector3.ZERO
+	tip_vel = Vector2.ZERO
+	tip_speed = 0.0
 	dynamic_accel_mag = 0.0
 	motion_energy = 0.0
+	active_peak_speed = 0.0
+	_refract_timer = 0.0
+	_same_dir_rearmed = true
+	_reversal_travel = 0.0
+	_backswing_timer = 0.0
+	_thrust_rearmed = true
 
 
 func recenter() -> void:
 	if gravity.length() > 1.0:
-		_ref_gravity = gravity.normalized()
+		_level_q = _from_to_rotation(gravity.normalized(), Vector3.DOWN)
 	else:
-		_ref_gravity = Vector3(0.0, -1.0, 0.0)
+		_level_q = Quaternion.IDENTITY
 	if accel.length() > 0.5:
 		_prev_accel = accel
 		_lp_accel = accel
 	else:
 		_lp_accel = Vector3.ZERO
 	recenter_offset = raw_orientation.inverse()
+	orientation = Quaternion.IDENTITY
 	pitch_rad = 0.0
 	yaw_rad = 0.0
 	roll_rad = 0.0
 	blade_roll_rad = 0.0
 	snapped_blade_roll_rad = 0.0
-	orientation = Quaternion.IDENTITY
 	has_centered_once = true
+	active_peak_speed = 0.0
+	swing_cooldown_timer = 0.0
+	_refract_timer = 0.0
+	_same_dir_rearmed = true
+	_reversal_travel = 0.0
+	_backswing_timer = 0.0
+	_thrust_rearmed = true
 
 
 func recenter_yaw() -> void:
+	var e := orientation.get_euler()
 	yaw_rad = 0.0
-	orientation = Quaternion.from_euler(Vector3(pitch_rad, yaw_rad, -roll_rad)).normalized()
+	orientation = Quaternion.from_euler(Vector3(e.x, 0.0, e.z)).normalized()
+	recenter_offset = (orientation * raw_orientation.inverse()).normalized()
 
 
 func start_bias_calibration(sample_frames: int = 25) -> void:
@@ -95,29 +124,23 @@ func start_bias_calibration(sample_frames: int = 25) -> void:
 	_bias_count = 0
 
 
-func update(delta: float, raw_gyro: Vector3, raw_accel: Vector3, raw_gravity: Vector3) -> void:
+func update(delta: float, raw_gyro: Vector3, raw_accel: Vector3, raw_gravity: Vector3, peak_gyro: Vector3 = Vector3.ZERO) -> void:
 	just_swung = false
 	if delta <= 0.0 or delta > 0.15:
 		delta = 0.016
 
 	swing_cooldown_timer = maxf(0.0, swing_cooldown_timer - delta)
-	accel = raw_accel
-	if raw_gravity.length() > 0.5:
-		gravity = gravity.lerp(raw_gravity, 0.35) if gravity.length() > 0.5 else raw_gravity
-	linear_accel = raw_accel - raw_gravity
+	_refract_timer = maxf(0.0, _refract_timer - delta)
+	_backswing_timer = maxf(0.0, _backswing_timer - delta)
 
-	var dyn_accel := linear_accel.length()
-	if raw_accel.length() > 0.5:
-		if _lp_accel.length() < 0.5:
-			_lp_accel = raw_accel
-		var gy_mag := (raw_gyro - gyro_bias).length()
-		var hp_accel := (raw_accel - _lp_accel).length()
-		var mag_dev := absf(raw_accel.length() - 9.81)
-		dyn_accel = maxf(dyn_accel, maxf(hp_accel, mag_dev * 1.35))
-		var lp_alpha := 0.35 if (gy_mag < 0.35 and (raw_accel - _prev_accel).length() < 0.7) else 0.14
-		_lp_accel = _lp_accel.lerp(raw_accel, lp_alpha)
-	_prev_accel = raw_accel
-	dynamic_accel_mag = dyn_accel
+	accel = raw_accel
+	var has_valid_grav := raw_gravity.length() > 1.5
+	var raw_lin := (raw_accel - raw_gravity) if has_valid_grav else Vector3.ZERO
+	if has_valid_grav and raw_lin.length() < 16.0:
+		gravity = gravity.lerp(raw_gravity, 0.35) if gravity.length() > 1.5 else raw_gravity
+		linear_accel = raw_lin
+	else:
+		linear_accel = Vector3.ZERO
 
 	if _bias_samples_left > 0:
 		_bias_accum += raw_gyro
@@ -126,54 +149,76 @@ func update(delta: float, raw_gyro: Vector3, raw_accel: Vector3, raw_gravity: Ve
 		if _bias_samples_left == 0 and _bias_count > 0:
 			gyro_bias = _bias_accum / float(_bias_count)
 
-	# Adaptive zero-velocity bias tracking when controller rests still
-	if raw_gyro.length() < 0.25 and linear_accel.length() < 1.35:
-		gyro_bias = gyro_bias.lerp(raw_gyro, BIAS_ALPHA)
+	# Only learn gyro bias when clearly motionless so intentional slow aiming isn't swallowed
+	if raw_gyro.length() < 0.09 and linear_accel.length() < 0.85:
+		gyro_bias = gyro_bias.lerp(raw_gyro, 0.04)
 
 	var corrected := raw_gyro - gyro_bias
 	if corrected.length() < GYRO_DEADZONE:
 		corrected = Vector3.ZERO
 	gyro = corrected
 	angular_speed = gyro.length()
-	is_steady = angular_speed < STEADY_THRESHOLD
 
-	var angle := angular_speed * delta
+	# True 3D quaternion integration in right-handed sword frame (+gyro.z = clockwise twist -> -Z axis rot)
+	var omega_body := Vector3(gyro.x, gyro.y, -gyro.z)
+	var angle := omega_body.length() * delta
 	if angle > 0.0001:
-		var axis := gyro / angular_speed
-		var dq := Quaternion(axis, angle)
-		raw_orientation = (raw_orientation * dq).normalized()
+		var axis := omega_body / omega_body.length()
+		raw_orientation = (raw_orientation * Quaternion(axis, angle)).normalized()
 
-	# Decoupled integration in centered sword frame (+roll = 2 o'clock / screen right)
-	pitch_rad = clampf(pitch_rad + gyro.x * delta, -1.15, 1.15)
-	yaw_rad = clampf(yaw_rad + gyro.y * delta, -1.05, 1.05)
-	roll_rad = clampf(roll_rad + gyro.z * delta, -1.70, 1.70)
+	orientation = (recenter_offset * raw_orientation).normalized()
 
-	# Sagittal-plane gravity anchor: works cleanly from flat (0 deg) up to upright (85 deg) with zero yaw coupling
-	var g_len := gravity.length()
-	var ref_yz := Vector2(_ref_gravity.y, _ref_gravity.z)
-	if g_len > 6.0 and g_len < 13.5 and linear_accel.length() < 3.2 and angular_speed < 3.6 and ref_yz.length() > 0.25:
-		var gn := gravity / g_len
-		var d0_yz := ref_yz.normalized()
-		var perp_yz := Vector2(-d0_yz.y, d0_yz.x)
-		var gn_yz := Vector2(gn.y, gn.z)
-		var sag := gn_yz.dot(d0_yz)
-		if sag > 0.15 or absf(gn.x) > 0.25:
-			var ref_roll := atan2(_ref_gravity.x, ref_yz.length())
-			var now_roll := atan2(gn.x, maxf(sag, 0.05) if absf(gn.x) < 0.9 else sag)
-			var grav_roll := clampf(wrapf(now_roll - ref_roll, -PI, PI), -1.65, 1.65)
-			roll_rad = lerp_angle(roll_rad, grav_roll, GRAVITY_BLEND)
+	# World-frame linear thrust estimation (rotation-invariant: pure wrist twists NEVER fake acceleration!)
+	var dyn_accel := linear_accel.length()
+	if raw_accel.length() > 0.5:
+		var world_accel := orientation * raw_accel
+		if _lp_accel.length() < 0.5:
+			_lp_accel = world_accel
+		var hp_world := (world_accel - _lp_accel).length()
+		var mag_dev := absf(raw_accel.length() - 9.81)
+		if dyn_accel < THRUST_ACCEL_THRESHOLD and mag_dev >= 1.15:
+			dyn_accel = maxf(dyn_accel, maxf(hp_world, mag_dev * 1.45))
+		var lp_alpha := 0.36 if (angular_speed < 0.45 and (world_accel - _prev_accel).length() < 0.8) else 0.14
+		_lp_accel = _lp_accel.lerp(world_accel, lp_alpha)
+		_prev_accel = world_accel
+	dynamic_accel_mag = dyn_accel
 
-		var grav_pitch := clampf(atan2(-gn_yz.dot(perp_yz), maxf(absf(sag), 0.1)), -1.10, 1.10)
-		pitch_rad = lerp_angle(pitch_rad, grav_pitch, GRAVITY_BLEND * 0.85)
+	# 3D Earth-leveled complementary tilt correction: fixes pitch/horizon drift without EVER fighting yaw or tilted forearm roll
+	if raw_accel.length() > 6.5 and raw_accel.length() < 13.0 and dyn_accel < 1.8 and angular_speed < 2.2:
+		var q_earth := (_level_q * orientation).normalized()
+		var g_meas_earth := (q_earth * raw_accel).normalized()
+		var tilt_err_earth := g_meas_earth.cross(Vector3.DOWN)
+		var err_sin := tilt_err_earth.length()
+		if err_sin > 0.0005:
+			var corr_ang := asin(clampf(err_sin, -0.7, 0.7)) * clampf(delta * 2.2, 0.0, 0.12)
+			var dq_earth := Quaternion(tilt_err_earth / err_sin, corr_ang)
+			var dq_sword := (_level_q.inverse() * dq_earth * _level_q).normalized()
+			recenter_offset = (dq_sword * recenter_offset).normalized()
+			orientation = (recenter_offset * raw_orientation).normalized()
 
-	# Soft yaw spring return when stationary so aim stays centered during combat
-	if angular_speed < 0.55:
-		yaw_rad = lerpf(yaw_rad, 0.0, clampf(delta * YAW_SPRING_STILL, 0.0, 1.0))
+	_sync_derived_angles_from_orientation()
 
-	orientation = Quaternion.from_euler(Vector3(pitch_rad, yaw_rad, -roll_rad)).normalized()
-	blade_roll_rad = clampf(roll_rad, -PI * 0.55, PI * 0.55)
-	snapped_blade_roll_rad = _compute_snapped_roll(blade_roll_rad)
-	_detect_swing(delta)
+	# Compute true 3D tip velocity from angular velocity cross blade tip vector!
+	# Pure wrist roll along blade spine produces ZERO tip velocity (0 false swings while turning guard!).
+	var eff_gyro := gyro
+	if peak_gyro.length() > angular_speed:
+		eff_gyro = peak_gyro - gyro_bias
+	var w_world := orientation * Vector3(eff_gyro.x, eff_gyro.y, -eff_gyro.z)
+	var tip_world := orientation * Vector3.FORWARD
+	var v_tip := w_world.cross(tip_world)
+	tip_vel = Vector2(v_tip.x, -v_tip.y)
+	tip_speed = tip_vel.length()
+
+	# Suppress false tip wobble when rapidly twisting forearm purely to set block angle
+	var roll_rate := absf(eff_gyro.z)
+	var eff_tip_speed := tip_speed
+	if roll_rate > 2.6:
+		eff_tip_speed /= (1.0 + (roll_rate - 2.6) * 0.28)
+	eff_tip_speed *= clampf(GameConfig.dual_sense_sensitivity, 0.65, 1.55)
+	dynamic_accel_mag *= clampf(GameConfig.dual_sense_sensitivity, 0.65, 1.55)
+
+	is_steady = eff_tip_speed < STEADY_THRESHOLD and dynamic_accel_mag < 3.5
+	_detect_swing_v2(delta, eff_tip_speed, tip_vel)
 
 
 func apply_external_orientation(target_q: Quaternion, delta: float, raw_gyro: Vector3, raw_linear: Vector3) -> void:
@@ -181,20 +226,34 @@ func apply_external_orientation(target_q: Quaternion, delta: float, raw_gyro: Ve
 	if delta <= 0.0 or delta > 0.15:
 		delta = 0.016
 	swing_cooldown_timer = maxf(0.0, swing_cooldown_timer - delta)
+	_refract_timer = maxf(0.0, _refract_timer - delta)
+	_backswing_timer = maxf(0.0, _backswing_timer - delta)
 	raw_orientation = target_q.normalized()
 	orientation = (recenter_offset * raw_orientation).normalized()
-	var e := orientation.get_euler()
-	pitch_rad = e.x
-	yaw_rad = e.y
-	roll_rad = -e.z
-	blade_roll_rad = clampf(roll_rad, -PI * 0.55, PI * 0.55)
-	snapped_blade_roll_rad = _compute_snapped_roll(blade_roll_rad)
+	_sync_derived_angles_from_orientation()
 	gyro = raw_gyro
 	linear_accel = raw_linear
 	angular_speed = raw_gyro.length()
+	var w_world := orientation * Vector3(gyro.x, gyro.y, -gyro.z)
+	var v_tip := w_world.cross(orientation * Vector3.FORWARD)
+	tip_vel = Vector2(v_tip.x, -v_tip.y)
+	tip_speed = tip_vel.length()
 	dynamic_accel_mag = raw_linear.length()
-	is_steady = angular_speed < STEADY_THRESHOLD
-	_detect_swing(delta)
+	is_steady = tip_speed < STEADY_THRESHOLD
+	_detect_swing_v2(delta, tip_speed, tip_vel)
+
+
+func _sync_derived_angles_from_orientation() -> void:
+	var right := orientation * Vector3.RIGHT
+	var up := orientation * Vector3.UP
+	var fwd := orientation * Vector3.FORWARD
+
+	pitch_rad = clampf(asin(clampf(fwd.y, -0.99, 0.99)), -1.45, 1.45)
+	yaw_rad = clampf(atan2(-fwd.x, maxf(-fwd.z, 0.15)), -1.45, 1.45)
+	if absf(right.y) > 0.04 or absf(up.y) > 0.04:
+		roll_rad = clampf(atan2(-right.y, up.y), -PI * 0.85, PI * 0.85)
+	blade_roll_rad = clampf(roll_rad, -PI * 0.65, PI * 0.65)
+	snapped_blade_roll_rad = blade_roll_rad
 
 
 func quantize_4_angles(angle_rad: float) -> float:
@@ -209,57 +268,72 @@ func quantize_4_angles(angle_rad: float) -> float:
 	return best
 
 
-func _compute_snapped_roll(raw_roll: float) -> float:
-	var targets := [-PI * 0.5, -PI * 0.25, 0.0, PI * 0.25, PI * 0.5]
-	var snap_zone := 0.24
-	var best := raw_roll
-	var best_dist := snap_zone
-	for t in targets:
-		var d := absf(raw_roll - t)
-		if d < best_dist:
-			best_dist = d
-			best = t
-	if best == raw_roll:
-		return raw_roll
-	var closeness := 1.0 - (best_dist / snap_zone)
-	return lerpf(raw_roll, best, closeness * closeness * 0.88)
+func _detect_swing_v2(delta: float, eff_tip_speed: float, raw_tip_vec: Vector2) -> void:
+	var thrust_energy := dynamic_accel_mag * 0.56
+	motion_energy = maxf(eff_tip_speed, thrust_energy)
 
+	if eff_tip_speed > active_peak_speed:
+		active_peak_speed = eff_tip_speed
 
-func _detect_swing(delta: float) -> void:
-	motion_energy = angular_speed + dynamic_accel_mag * 0.44
+	# Track quiet pullback/backswing so the real forward chop feels effortless and extra punchy
+	if _refract_timer <= 0.0 and eff_tip_speed > 1.2 and eff_tip_speed < SWING_THRESHOLD:
+		_backswing_dir = raw_tip_vec.normalized()
+		_backswing_timer = 0.35
 
-	if not _swing_armed:
-		if motion_energy < SWING_THRESHOLD * 0.52 and swing_cooldown_timer <= 0.0:
-			_swing_armed = true
+	# Forward thrust trigger ("Empuje frontal / Estocada")
+	if dynamic_accel_mag < THRUST_ACCEL_THRESHOLD * 0.45:
+		_thrust_rearmed = true
+	if _refract_timer <= 0.0 and _thrust_rearmed and dynamic_accel_mag >= THRUST_ACCEL_THRESHOLD and eff_tip_speed < 2.8:
+		_thrust_rearmed = false
+		_refract_timer = SWING_REFRACTORY
+		swing_cooldown_timer = SWING_REFRACTORY
+		_same_dir_rearmed = false
+		_reversal_travel = 0.0
+		var cut_ang := quantize_4_angles(blade_roll_rad) - PI * 0.5
+		last_slash_dir = Vector2(cos(cut_ang), sin(cut_ang)).normalized()
+		_last_strike_dir = last_slash_dir
+		last_slash_power = clampf(0.55 + (dynamic_accel_mag - THRUST_ACCEL_THRESHOLD) / 10.5, 0.55, 1.75)
+		last_slash_type = SlashType.THRUST
+		last_swing_source = "Empuje frontal"
+		just_swung = true
+		active_peak_speed = eff_tip_speed
 		return
 
-	if _peak_timer > 0.0:
-		_peak_timer -= delta
-		if angular_speed > _peak_gyro.length():
-			_peak_gyro = gyro
-		if dynamic_accel_mag > _peak_dyn_accel:
-			_peak_dyn_accel = dynamic_accel_mag
-		if _peak_timer <= 0.0:
-			just_swung = true
-			_swing_armed = false
-			swing_cooldown_timer = SWING_COOLDOWN
+	if eff_tip_speed < 1.35:
+		_same_dir_rearmed = true
 
-			# Switch Sports cut direction logic: blade orientation defines the cut plane!
-			# Only pure horizontal swipes from a vertical stance override to horizontal cut.
-			var horiz := -_peak_gyro.y
-			var vert := _peak_gyro.x
-			if absf(snapped_blade_roll_rad) < 0.26 and absf(horiz) > absf(vert) * 1.25 and absf(horiz) > 1.3:
-				last_slash_dir = Vector2(signf(horiz), 0.0)
-			else:
-				var cut_ang := quantize_4_angles(snapped_blade_roll_rad) - PI * 0.5
-				last_slash_dir = Vector2(cos(cut_ang), sin(cut_ang)).normalized()
+	if _refract_timer > 0.0:
+		return
 
-			last_slash_power = clampf(maxf(_peak_gyro.length() / 9.2, _peak_dyn_accel / 12.5), 0.55, 1.45)
-			last_swing_source = "Latigazo de muñeca" if _peak_gyro.length() >= 2.0 else "Empuje frontal"
-	elif swing_cooldown_timer <= 0.0 and motion_energy >= SWING_THRESHOLD:
-		_peak_gyro = gyro
-		_peak_dyn_accel = dynamic_accel_mag
-		_peak_timer = 0.028
+	var strike_dir := raw_tip_vec.normalized() if raw_tip_vec.length() > 0.1 else Vector2.RIGHT
+	var align := strike_dir.dot(_last_strike_dir)
+	var is_reverse_combo := (not _same_dir_rearmed) and (align < -0.25)
+	if is_reverse_combo:
+		_reversal_travel += eff_tip_speed * delta
+
+	var is_primed_forward := (_backswing_timer > 0.0 and strike_dir.dot(_backswing_dir) < -0.25)
+	var threshold := COMBO_THRESHOLD if is_reverse_combo else (SWING_PRIMED_THRESHOLD if is_primed_forward else SWING_THRESHOLD)
+	var allowed := _same_dir_rearmed or (is_reverse_combo and _reversal_travel >= 0.22)
+
+	if allowed and eff_tip_speed >= threshold:
+		_refract_timer = SWING_REFRACTORY
+		swing_cooldown_timer = SWING_REFRACTORY
+		_same_dir_rearmed = false
+		_reversal_travel = 0.0
+		_backswing_timer = 0.0
+
+		last_slash_dir = strike_dir
+		_last_strike_dir = strike_dir
+		var bonus := 0.15 if is_primed_forward else 0.0
+		last_slash_power = clampf(0.45 + (eff_tip_speed - threshold) / 10.5 + bonus, 0.45, 1.85)
+		last_slash_type = SlashType.CUT
+		last_swing_source = "Combo" if is_reverse_combo else "Tajo 1:1"
+		active_peak_speed = eff_tip_speed
+		just_swung = true
+
+
+func compute_live_power_from_peak(peak_spd: float) -> float:
+	return clampf(0.45 + maxf(peak_spd - 2.6, 0.0) / 10.5, 0.45, 1.85)
 
 
 func get_blade_roll_rad() -> float:
@@ -272,3 +346,17 @@ func get_snapped_blade_roll_rad() -> float:
 
 func get_blade_angle_deg() -> float:
 	return rad_to_deg(blade_roll_rad)
+
+
+func _from_to_rotation(from_dir: Vector3, to_dir: Vector3) -> Quaternion:
+	var f := from_dir.normalized()
+	var t := to_dir.normalized()
+	var d := f.dot(t)
+	if d > 0.9999:
+		return Quaternion.IDENTITY
+	if d < -0.9999:
+		var ortho := f.cross(Vector3.RIGHT)
+		if ortho.length_squared() < 0.001:
+			ortho = f.cross(Vector3.FORWARD)
+		return Quaternion(ortho.normalized(), PI)
+	return Quaternion(f, t).normalized()

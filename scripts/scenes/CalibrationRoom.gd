@@ -2,6 +2,7 @@
 extends Node3D
 
 const AVATAR_SCENE := preload("res://scenes/AvatarFighter.tscn")
+const DojoStageScript := preload("res://scripts/game/DojoStage.gd")
 
 enum DemoMode { AUTO, POSTURE, TWIST, SLASH, GUARD }
 
@@ -21,16 +22,27 @@ enum DemoMode { AUTO, POSTURE, TWIST, SLASH, GUARD }
 @onready var btn_s4: Button = $UI/HUD/CoachCard/VBox/StepButtons/BtnStep4
 
 var _demo_mode: DemoMode = DemoMode.AUTO
-var _active_step: int = 0 # 0=Posture, 1=Twist, 2=Slash, 3=Guard
+var _active_step: int = 0
 var _auto_timer: float = 0.0
 var _step_t: float = 0.0
+var _shader_time: float = 0.0
 var _slash_fired_cycle: int = -1
 var _guard_fx_cycle: int = -1
 var _swing_flash_timer: float = 0.0
 var _last_attack_label: String = ""
 
+var _stage_refs: Dictionary = {}
+var _sparks: Array[Dictionary] = []
+
 var _coach_avatar: AvatarFighter
 var _live_avatar: AvatarFighter
+var _dummy_avatar: AvatarFighter
+var _dummy_home: Vector3 = Vector3(0.92, 0.0, -1.85)
+var _dummy_guard_timer: float = 0.0
+var _dummy_guard_angles: Array[float] = [0.0, PI * 0.5, PI * 0.25, -PI * 0.25]
+var _dummy_angle_idx: int = 0
+var _dummy_hits: int = 0
+
 var _coach_phone_roll: Node3D
 var _coach_phone_tilt: Node3D
 var _coach_thumb_dot: MeshInstance3D
@@ -53,64 +65,25 @@ func _ready() -> void:
 		return
 
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	MotionHub.recenter_slot(0)
+	var hub := get_node_or_null("/root/MotionHub")
+	if hub != null:
+		hub.mouse_combat_enabled = true
+		hub.recenter_slot(0)
 
 
 func _build_stage() -> void:
-	for ch in stage_root.get_children():
-		ch.free()
+	_stage_refs = DojoStageScript.build_stage(stage_root, GameConfig.arena_stage, 4.1)
 
-	# Ocean water plane
-	var water := MeshInstance3D.new()
-	var wm := PlaneMesh.new()
-	wm.size = Vector2(140.0, 140.0)
-	water.mesh = wm
-	var wmat := StandardMaterial3D.new()
-	wmat.albedo_color = Color(0.06, 0.56, 0.84)
-	wmat.roughness = 0.14
-	water.material_override = wmat
-	water.position = Vector3(0.0, -1.35, 0.0)
-	stage_root.add_child(water)
-
-	# Dojo wooden platform
-	var base := MeshInstance3D.new()
-	var bm := CylinderMesh.new()
-	bm.top_radius = 4.1
-	bm.bottom_radius = 3.6
-	bm.height = 1.35
-	bm.radial_segments = 48
-	base.mesh = bm
-	var bmat := StandardMaterial3D.new()
-	bmat.albedo_color = Color(0.32, 0.36, 0.44)
-	base.material_override = bmat
-	base.position = Vector3(0.0, -0.72, 0.0)
-	stage_root.add_child(base)
-
-	var plat := MeshInstance3D.new()
-	var pm := CylinderMesh.new()
-	pm.top_radius = 4.0
-	pm.bottom_radius = 4.0
-	pm.height = 0.14
-	pm.radial_segments = 48
-	plat.mesh = pm
-	var pmat := StandardMaterial3D.new()
-	pmat.albedo_color = Color(0.89, 0.78, 0.60)
-	pmat.roughness = 0.55
-	plat.material_override = pmat
-	plat.position = Vector3(0.0, -0.07, 0.0)
-	stage_root.add_child(plat)
-
-	# Center divider stripe separating Coach (left) and Player (right)
 	var divider := MeshInstance3D.new()
 	var dm := BoxMesh.new()
-	dm.size = Vector3(0.05, 0.02, 6.8)
+	dm.size = Vector3(0.05, 0.02, 6.2)
 	divider.mesh = dm
 	var dmat := StandardMaterial3D.new()
 	dmat.albedo_color = Color(0.18, 0.74, 0.96, 0.85)
 	dmat.emission_enabled = true
 	dmat.emission = Color(0.18, 0.74, 0.96) * 0.45
 	divider.material_override = dmat
-	divider.position = Vector3(0.0, 0.01, 0.0)
+	divider.position = Vector3(-0.18, 0.02, 0.0)
 	stage_root.add_child(divider)
 
 	# Left: Animated Instructor Fighter + 3D Floating Smartphone Diagram
@@ -118,9 +91,10 @@ func _build_stage() -> void:
 	_coach_avatar.fighter_name = "Instructor"
 	_coach_avatar.team_color = Color(0.10, 0.86, 0.75)
 	stage_root.add_child(_coach_avatar)
-	_coach_avatar.reset_for_round(Vector3(-1.35, 0.0, -0.35), Vector2(0.30, -0.95))
+	_coach_avatar.configure_stage(GameConfig.arena_stage, 4.0)
+	_coach_avatar.reset_for_round(Vector3(-1.45, 0.0, -0.35), Vector2(0.15, -0.98))
 
-	var coach_phone_nodes := _create_phone_rig(Vector3(-1.32, 1.52, 1.60), Color(0.10, 0.88, 0.78), true)
+	var coach_phone_nodes := _create_phone_rig(Vector3(-1.42, 1.52, 1.58), Color(0.10, 0.88, 0.78), true)
 	_coach_phone_roll = coach_phone_nodes["roll"]
 	_coach_phone_tilt = coach_phone_nodes["tilt"]
 	_coach_thumb_dot = coach_phone_nodes["thumb"]
@@ -129,14 +103,24 @@ func _build_stage() -> void:
 	_coach_enemy_mat = coach_phone_nodes["enemy_mat"]
 	_coach_parry_ring = coach_phone_nodes["parry_ring"]
 
-	# Right: Player 1 Live Avatar + 3D Smartphone Mirror
+	# Right: Player 1 Live Avatar + Sparring Dummy + 3D Smartphone Mirror
 	_live_avatar = AVATAR_SCENE.instantiate() as AvatarFighter
 	_live_avatar.fighter_name = "Jugador 1"
 	_live_avatar.team_color = Color(0.05, 0.78, 0.92)
 	stage_root.add_child(_live_avatar)
-	_live_avatar.reset_for_round(Vector3(1.35, 0.0, -0.35), Vector2(-0.30, -0.95))
+	_live_avatar.configure_stage(GameConfig.arena_stage, 4.0)
+	_live_avatar.set_twin_blades(GameConfig.combat_style == GameConfig.CombatStyle.TWIN_BLADES)
+	_live_avatar.reset_for_round(Vector3(1.25, 0.0, -0.20), Vector2(-0.20, -0.98))
+	_live_avatar.slash_impact.connect(_on_live_slash_impact)
 
-	var live_phone_nodes := _create_phone_rig(Vector3(1.32, 1.52, 1.60), Color(0.08, 0.80, 0.98), false)
+	_dummy_avatar = AVATAR_SCENE.instantiate() as AvatarFighter
+	_dummy_avatar.fighter_name = "Muñeco Dojo"
+	_dummy_avatar.team_color = Color(0.95, 0.62, 0.16)
+	stage_root.add_child(_dummy_avatar)
+	_dummy_avatar.configure_stage(GameConfig.arena_stage, 4.0)
+	_dummy_avatar.reset_for_round(_dummy_home, Vector2(0.20, 0.98))
+
+	var live_phone_nodes := _create_phone_rig(Vector3(1.42, 1.52, 1.58), Color(0.08, 0.80, 0.98), false)
 	_live_phone_roll = live_phone_nodes["roll"]
 	_live_phone_tilt = live_phone_nodes["tilt"]
 	_live_thumb_dot = live_phone_nodes["thumb"]
@@ -148,13 +132,13 @@ func _create_phone_rig(pos: Vector3, tint: Color, is_coach: bool) -> Dictionary:
 	mount.position = pos
 	stage_root.add_child(mount)
 
-	var roll_pivot := Node3D.new()
-	mount.add_child(roll_pivot)
-
+	# Correct Euler parenting: tilt pitch forward FIRST, then child twists cleanly along the tilted phone shaft!
 	var tilt_pivot := Node3D.new()
-	roll_pivot.add_child(tilt_pivot)
+	mount.add_child(tilt_pivot)
 
-	# Smartphone chassis
+	var roll_pivot := Node3D.new()
+	tilt_pivot.add_child(roll_pivot)
+
 	var body := MeshInstance3D.new()
 	var bm := BoxMesh.new()
 	bm.size = Vector3(0.24, 0.44, 0.036)
@@ -163,9 +147,8 @@ func _create_phone_rig(pos: Vector3, tint: Color, is_coach: bool) -> Dictionary:
 	body_mat.albedo_color = Color(0.10, 0.12, 0.16)
 	body_mat.roughness = 0.25
 	body.material_override = body_mat
-	tilt_pivot.add_child(body)
+	roll_pivot.add_child(body)
 
-	# Smartphone screen facing back toward the player (+Z)
 	var screen := MeshInstance3D.new()
 	var sm := BoxMesh.new()
 	sm.size = Vector3(0.21, 0.39, 0.008)
@@ -176,9 +159,8 @@ func _create_phone_rig(pos: Vector3, tint: Color, is_coach: bool) -> Dictionary:
 	screen_mat.emission = tint * 0.42
 	screen.material_override = screen_mat
 	screen.position = Vector3(0.0, 0.0, 0.020)
-	tilt_pivot.add_child(screen)
+	roll_pivot.add_child(screen)
 
-	# Glowing Katana extension coming out top edge (+Y) of the phone
 	var blade := MeshInstance3D.new()
 	var blm := BoxMesh.new()
 	blm.size = Vector3(0.042, 0.56, 0.020)
@@ -189,9 +171,8 @@ func _create_phone_rig(pos: Vector3, tint: Color, is_coach: bool) -> Dictionary:
 	blade_mat.emission = tint * 1.15
 	blade.material_override = blade_mat
 	blade.position = Vector3(0.0, 0.48, 0.0)
-	tilt_pivot.add_child(blade)
+	roll_pivot.add_child(blade)
 
-	# Thumb touch indicator dot on screen (illuminates when Guarding)
 	var thumb := MeshInstance3D.new()
 	var tm := SphereMesh.new()
 	tm.radius = 0.048
@@ -204,7 +185,7 @@ func _create_phone_rig(pos: Vector3, tint: Color, is_coach: bool) -> Dictionary:
 	thumb.material_override = tmat
 	thumb.position = Vector3(0.0, -0.02, 0.055)
 	thumb.visible = false
-	tilt_pivot.add_child(thumb)
+	roll_pivot.add_child(thumb)
 
 	var out := {
 		"roll": roll_pivot,
@@ -214,7 +195,6 @@ func _create_phone_rig(pos: Vector3, tint: Color, is_coach: bool) -> Dictionary:
 	}
 
 	if is_coach:
-		# Yellow/green forward swing motion arrow hovering above the phone
 		var arrow_root := Node3D.new()
 		arrow_root.position = Vector3(0.24, 0.20, 0.0)
 		arrow_root.visible = false
@@ -244,7 +224,6 @@ func _create_phone_rig(pos: Vector3, tint: Color, is_coach: bool) -> Dictionary:
 		arrow_root.add_child(tip)
 		out["arrow"] = arrow_root
 
-		# Red enemy telegraph bar (shown during Step 4 Guard/Parry demo)
 		var enemy_bar := MeshInstance3D.new()
 		var ebm := BoxMesh.new()
 		ebm.size = Vector3(0.75, 0.055, 0.055)
@@ -260,7 +239,6 @@ func _create_phone_rig(pos: Vector3, tint: Color, is_coach: bool) -> Dictionary:
 		out["enemy_bar"] = enemy_bar
 		out["enemy_mat"] = emat
 
-		# Golden parry ring
 		var parry_ring := MeshInstance3D.new()
 		var prm := TorusMesh.new()
 		prm.inner_radius = 0.28
@@ -304,8 +282,15 @@ func _process(delta: float) -> void:
 	if Engine.is_editor_hint():
 		return
 
+	_shader_time += delta
+	var wmat: ShaderMaterial = _stage_refs.get("water_mat")
+	if wmat != null:
+		wmat.set_shader_parameter("u_time", _shader_time)
+
+	_step_sparks(delta)
 	_animate_coach(delta)
 	_update_live_player(delta)
+	_update_sparring_dummy(delta)
 
 
 func _animate_coach(delta: float) -> void:
@@ -328,20 +313,20 @@ func _animate_coach(delta: float) -> void:
 	_coach_thumb_dot.visible = false
 
 	var target_roll := 0.0
-	var target_pitch := -0.68 # ~40 deg pointing forward-up toward monitor
+	var target_pitch := -0.68
 	var target_z_offset := 0.0
 	var guarding := false
 
 	match _active_step:
-		0: # Paso 1: Postura Base (~45°) y Centrar
+		0:
 			target_roll = 0.0
 			target_pitch = -0.68 + sin(_step_t * 2.5) * 0.03
-		1: # Paso 2: Girar solo la muñeca (4 ángulos)
+		1:
 			var poses := [0.0, PI * 0.25, PI * 0.5, -PI * 0.25]
 			var idx := int(floor(_step_t / 0.85)) % poses.size()
 			target_roll = poses[idx]
 			target_pitch = -0.68
-		2: # Paso 3: Atacar hacia delante (corte de muñeca / empuje)
+		2:
 			var cycle_len := 1.75
 			var cyc := int(floor(_step_t / cycle_len))
 			var p := fmod(_step_t, cycle_len)
@@ -365,23 +350,21 @@ func _animate_coach(delta: float) -> void:
 			else:
 				var rp := (p - 0.86) / 0.89
 				target_pitch = lerpf(-1.48, -0.68, rp)
-		3: # Paso 4: Bloquear (+) y Cortar en Paralelo (=)
+		3:
 			var sub_len := 3.4
 			var sub_cyc := int(floor(_step_t / sub_len))
 			var sp := fmod(_step_t, sub_len)
 			if sp < 1.75:
-				# Parry perpendicular: enemy attacks HORIZONTAL, coach holds VERTICAL + thumb pressed!
 				guarding = true
 				target_roll = 0.0
 				target_pitch = -0.68
 				_coach_thumb_dot.visible = true
 				_coach_enemy_bar.visible = true
-				_coach_enemy_bar.rotation.z = 0.0 # Horizontal red attack line
+				_coach_enemy_bar.rotation.z = 0.0
 				if sp > 0.95 and sp < 1.50:
 					_coach_parry_ring.visible = true
 					_coach_parry_ring.scale = Vector3.ONE * (0.9 + (sp - 0.95) * 1.4)
 			else:
-				# Parallel guard break: enemy blocks HORIZONTAL, coach rotates HORIZONTAL and slashes!
 				target_roll = PI * 0.5
 				_coach_enemy_bar.visible = true
 				_coach_enemy_bar.rotation.z = 0.0
@@ -397,9 +380,9 @@ func _animate_coach(delta: float) -> void:
 				else:
 					target_pitch = -0.68
 
-	_coach_phone_roll.rotation.z = lerp_angle(_coach_phone_roll.rotation.z, -target_roll, clampf(delta * 14.0, 0.0, 1.0))
 	_coach_phone_tilt.rotation.x = lerpf(_coach_phone_tilt.rotation.x, target_pitch, clampf(delta * 18.0, 0.0, 1.0))
 	_coach_phone_tilt.position.z = lerpf(_coach_phone_tilt.position.z, target_z_offset, clampf(delta * 18.0, 0.0, 1.0))
+	_coach_phone_roll.rotation.z = lerp_angle(_coach_phone_roll.rotation.z, -target_roll, clampf(delta * 14.0, 0.0, 1.0))
 
 	_coach_avatar.is_guarding = guarding
 	if _coach_avatar.state == AvatarFighter.State.NORMAL:
@@ -415,25 +398,32 @@ func _update_live_player(delta: float) -> void:
 		_live_avatar.blade_orientation = s0.fusion.orientation
 		_live_avatar.blade_roll_rad = s0.fusion.get_snapped_blade_roll_rad()
 		_live_avatar.is_guarding = s0.is_guarding
-		if _live_avatar.state == AvatarFighter.State.NORMAL and s0.fusion.just_swung:
-			_live_avatar.trigger_slash(s0.fusion.last_slash_dir, s0.fusion.last_slash_power)
-			_swing_flash_timer = 1.35
-			_last_attack_label = "✅ ¡ATAQUE! (%s) -> %s" % [
-				s0.fusion.last_swing_source if s0.fusion.last_swing_source != "" else "Corte",
-				_describe_slash_dir(s0.fusion.last_slash_dir)
-			]
-			var sfx := get_node_or_null("/root/SoundFX")
-			if sfx != null:
-				sfx.play("slash", randf_range(0.95, 1.15), -7.0)
-			MotionHub.trigger_rumble(0, 0.45, 0.08)
+		if _live_avatar.state == AvatarFighter.State.SLASHING and not _live_avatar._hit_resolved_this_swing:
+			_live_avatar.update_live_slash_power(s0.fusion.compute_live_power_from_peak(s0.fusion.active_peak_speed))
+		if _live_avatar.state == AvatarFighter.State.NORMAL:
+			if s0.just_dodge_pressed:
+				_live_avatar.trigger_dodge(s0.move_axis)
+			elif s0.buffered_strike_timer > 0.0 or s0.fusion.just_swung:
+				var atk_t := s0.buffered_strike_type if s0.buffered_strike_timer > 0.0 else s0.fusion.last_slash_type
+				var dir := s0.buffered_strike_dir if s0.buffered_strike_timer > 0.0 else s0.fusion.last_slash_dir
+				var pwr := s0.buffered_strike_power if s0.buffered_strike_timer > 0.0 else s0.fusion.last_slash_power
+				s0.buffered_strike_timer = 0.0
+				_live_avatar.trigger_slash(dir, pwr, atk_t)
+				_swing_flash_timer = 1.35
+				var spd_tier := "¡CRÍTICO!" if pwr >= 1.35 else ("Rápido" if pwr >= 0.85 else "Suave")
+				var kind_txt := "⚡ ESTOCADA" if atk_t == AvatarFighter.AttackType.THRUST else _describe_slash_dir(dir)
+				_last_attack_label = "✅ %s (%s | %.1fx)" % [kind_txt, spd_tier, pwr]
+				MotionHub.trigger_rumble(0, 0.5, 0.09)
 
-		_live_avatar.step_fighter(delta, Vector2.ZERO, Vector3(0.3, 0.0, -4.0), true)
+		var target_dummy_pos := _dummy_avatar.position if _dummy_avatar else Vector3(0.9, 0.0, -2.0)
+		_live_avatar.step_fighter(delta, s0.move_axis * 0.4, target_dummy_pos, true)
+		_live_avatar.position = _live_avatar.position.lerp(Vector3(1.25, 0.0, -0.20), clampf(delta * 4.5, 0.0, 1.0))
 
 	if _live_phone_roll and _live_phone_tilt:
 		var roll_s := s0.fusion.get_snapped_blade_roll_rad()
-		_live_phone_roll.rotation.z = lerp_angle(_live_phone_roll.rotation.z, -roll_s, clampf(delta * 20.0, 0.0, 1.0))
-		_live_phone_roll.rotation.y = lerpf(_live_phone_roll.rotation.y, clampf(s0.fusion.yaw_rad * 0.7, -0.7, 0.7), clampf(delta * 16.0, 0.0, 1.0))
 		_live_phone_tilt.rotation.x = lerpf(_live_phone_tilt.rotation.x, -0.68 + clampf(s0.fusion.pitch_rad * 0.85, -0.95, 0.75), clampf(delta * 18.0, 0.0, 1.0))
+		_live_phone_tilt.rotation.y = lerpf(_live_phone_tilt.rotation.y, clampf(s0.fusion.yaw_rad * 0.7, -0.7, 0.7), clampf(delta * 16.0, 0.0, 1.0))
+		_live_phone_roll.rotation.z = lerp_angle(_live_phone_roll.rotation.z, -roll_s, clampf(delta * 20.0, 0.0, 1.0))
 		_live_thumb_dot.visible = s0.is_guarding
 
 	_swing_flash_timer = maxf(0.0, _swing_flash_timer - delta)
@@ -453,23 +443,96 @@ func _update_live_player(delta: float) -> void:
 			fill_sb.bg_color = Color(0.12, 0.84, 0.96, 1.0)
 		if _live_screen_mat:
 			_live_screen_mat.emission = Color(0.08, 0.80, 0.98) * 0.42
-		swing_badge.text = "Fuerza actual: %.0f%% (llega a 100%% para cortar)" % pct
+		swing_badge.text = "Vel. Punta: %.0f%% (Muñeco hits: %d)" % [pct, _dummy_hits]
 		swing_badge.add_theme_color_override("font_color", Color(0.75, 0.92, 1.0))
 
-	p1_stats.text = "J1: %s | Gyro: %.1f, %.1f, %.1f rad/s | Empuje: %.1f m/s² | Hoja: %.0f° | Guardia: %s" % [
+	p1_stats.text = "J1 [%s] | Vel %.1f | Empuje %.1f m/s² | Hoja %.0f° | Guardia: %s" % [
 		s0.device_name,
-		s0.fusion.gyro.x, s0.fusion.gyro.y, s0.fusion.gyro.z,
+		s0.fusion.tip_speed,
 		s0.fusion.dynamic_accel_mag,
 		s0.fusion.get_blade_angle_deg(),
 		"ACTIVA" if s0.is_guarding else "Libre"
 	]
 
 	var s1: MotionHub.PlayerSlot = MotionHub.slots[1]
-	p2_stats.text = "J2: %s | Gyro: %.1f rad/s | Hoja: %.0f°" % [
-		s1.device_name,
-		s1.fusion.angular_speed,
-		s1.fusion.get_blade_angle_deg()
+	p2_stats.text = "Muñeco Dojo: Guardia %.0f° | J2 [%s]" % [
+		rad_to_deg(_dummy_avatar.blade_roll_rad) if _dummy_avatar else 0.0,
+		s1.device_name
 	]
+
+
+func _update_sparring_dummy(delta: float) -> void:
+	if _dummy_avatar == null:
+		return
+	_dummy_guard_timer += delta
+	if _dummy_guard_timer >= 2.2:
+		_dummy_guard_timer = 0.0
+		_dummy_angle_idx = (_dummy_angle_idx + 1) % _dummy_guard_angles.size()
+	_dummy_avatar.is_guarding = true
+	_dummy_avatar.blade_roll_rad = lerp_angle(_dummy_avatar.blade_roll_rad, _dummy_guard_angles[_dummy_angle_idx], clampf(delta * 9.0, 0.0, 1.0))
+	_dummy_avatar.step_fighter(delta, Vector2.ZERO, _live_avatar.position if _live_avatar else Vector3(1.25, 0.0, -0.20), true)
+	_dummy_avatar.position = _dummy_avatar.position.lerp(_dummy_home, clampf(delta * 4.5, 0.0, 1.0))
+
+
+func _on_live_slash_impact(_att: AvatarFighter, slash_dir: Vector2, power: float, atk_type: int) -> void:
+	if _dummy_avatar == null:
+		return
+	_dummy_hits += 1
+	var mid := (_live_avatar.position + _dummy_avatar.position) * 0.5 + Vector3(0.0, 1.05, 0.0)
+	var sfx := get_node_or_null("/root/SoundFX")
+
+	if atk_type == AvatarFighter.AttackType.THRUST:
+		_dummy_avatar.apply_knockback(Vector2(-0.2, -1.0) * (3.2 * power))
+		_spawn_sparks(mid, Color(1.0, 0.85, 0.25), 14)
+		if sfx:
+			sfx.play("hit", 1.15, -3.0)
+		_last_attack_label = "⚡ ¡ESTOCADA AL MUÑECO! (Perfora guardia)"
+	else:
+		var dot := absf(_dummy_avatar.get_world_blade_axis().dot(_live_avatar.get_world_slash_axis(slash_dir)))
+		if dot > 0.62:
+			_dummy_avatar.apply_knockback(Vector2(-0.2, -1.0) * (3.6 * power))
+			_spawn_sparks(mid, Color(1.0, 0.45, 0.2), 16)
+			if sfx:
+				sfx.play("guard_break", 0.95, -3.0)
+			_last_attack_label = "💥 ¡ROMPISTE LA GUARDIA DEL MUÑECO!"
+		else:
+			_dummy_avatar.apply_knockback(Vector2(-0.2, -1.0) * 1.1)
+			_spawn_sparks(mid, Color(0.35, 0.94, 1.0), 12)
+			if sfx:
+				sfx.play("block", 1.05, -4.0)
+			_last_attack_label = "🛡️ ¡MUÑECO BLOQUEÓ EN CRUZ! (Gira muñeca para romper)"
+	_swing_flash_timer = 1.4
+
+
+func _spawn_sparks(world_pos: Vector3, col: Color, count: int) -> void:
+	var smat := StandardMaterial3D.new()
+	smat.albedo_color = col
+	smat.emission_enabled = true
+	smat.emission = col * 2.1
+	var smesh := SphereMesh.new()
+	smesh.radius = 0.045
+	smesh.height = 0.09
+	for i in count:
+		var sp := MeshInstance3D.new()
+		sp.mesh = smesh
+		sp.material_override = smat
+		sp.position = world_pos
+		stage_root.add_child(sp)
+		_sparks.append({"node": sp, "vel": Vector3(randf_range(-4.0, 4.0), randf_range(0.8, 4.2), randf_range(-4.0, 4.0)), "life": randf_range(0.16, 0.30)})
+
+
+func _step_sparks(delta: float) -> void:
+	for i in range(_sparks.size() - 1, -1, -1):
+		var s := _sparks[i]
+		s["life"] -= delta
+		var n: MeshInstance3D = s["node"]
+		if s["life"] <= 0.0 or not is_instance_valid(n):
+			if is_instance_valid(n):
+				n.queue_free()
+			_sparks.remove_at(i)
+		else:
+			s["vel"].y -= 14.0 * delta
+			n.position += s["vel"] * delta
 
 
 func _describe_slash_dir(d: Vector2) -> String:
@@ -479,15 +542,15 @@ func _describe_slash_dir(d: Vector2) -> String:
 		return "HORIZONTAL —"
 	if ay > ax * 1.8:
 		return "VERTICAL |"
-	return "DIAGONAL /" if (d.x * d.y > 0.0) else "DIAGONAL \\"
+	return "DIAGONAL \\" if (d.x * d.y > 0.0) else "DIAGONAL /"
 
 
 func _refresh_step_ui() -> void:
 	var captions := [
-		"PASO 1 — POSTURA BASE: Ponte frente al monitor, sujeta el móvil a ~45° apuntando a la pantalla (como la empuñadura de una espada) y pulsa 🎯 CENTRAR.",
-		"PASO 2 — GIRAR LA HOJA: Sin mover el brazo, gira SOLO la muñeca izquierda/derecha para elegir el corte: Vertical |, Diagonal / \\ o Horizontal —.",
-		"PASO 3 — ATACAR HACIA DELANTE: Desde la postura (~45°), haz un golpe rápido de muñeca hacia delante/abajo (o empuje seco frontal). ¡Mira que la barra verde llegue al 100%!",
-		"PASO 4 — BLOQUEAR (+) Y ROMPER (=): Mantén pulsada la pantalla para cubrirte. Cruza tu espada en PERPENDICULAR (+) contra el golpe rojo para hacer Parry; alinea en PARALELO (=) para romper guardia."
+		"PASO 1 — POSTURA BASE: Sujeta el móvil a ~45° apuntando a la pantalla como empuñadura y pulsa 🎯 CENTRAR.",
+		"PASO 2 — GIRAR LA HOJA: Gira SOLO la muñeca (el eje de la hoja no dispara falsos golpes) y alinea contra el Muñeco Dojo.",
+		"PASO 3 — VELOCIDAD REAL: Arma hacia atrás o da un látigo rápido de muñeca/brazo (o ⚡ Estocada) para golpear al Muñeco Dojo.",
+		"PASO 4 — GUARDIA Y PARRY: Pulsa GUARDIA justo al impacto (<0.22s) para Parry Dorado, o Esquiva (Espacio / ◀ ▶)."
 	]
 	instruction_label.text = captions[_active_step]
 

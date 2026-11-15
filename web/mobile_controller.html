@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <link rel="icon" href="data:," />
-  <title>SportPC Mando 6-Axis</title>
+  <title>SportPC Mando 6-Axis Pro</title>
   <style>
     * {
       box-sizing: border-box;
@@ -28,29 +28,29 @@
       display: flex;
       flex-direction: column;
       height: 100%;
-      padding: 12px;
-      gap: 10px;
+      padding: 10px;
+      gap: 8px;
     }
     .header {
       display: flex;
       justify-content: space-between;
       align-items: center;
       background: rgba(255,255,255,0.07);
-      border: 1px solid rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.12);
       border-radius: 16px;
-      padding: 10px 14px;
-      gap: 8px;
+      padding: 8px 12px;
+      gap: 6px;
     }
     .title-wrap {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
     }
-    .title { font-weight: 800; font-size: 16px; letter-spacing: 0.3px; }
+    .title { font-weight: 900; font-size: 15px; letter-spacing: 0.3px; }
     .badge {
-      padding: 4px 10px;
+      padding: 3px 9px;
       border-radius: 999px;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 800;
       background: #ef4444;
       color: #fff;
@@ -61,69 +61,59 @@
       gap: 6px;
       align-items: center;
     }
-    .top-recenter, .top-guide {
-      border: 1px solid rgba(56, 189, 248, 0.55);
-      background: rgba(14, 165, 233, 0.22);
+    .top-btn {
+      border: 1px solid rgba(56, 189, 248, 0.5);
+      background: rgba(14, 165, 233, 0.20);
       color: #e0f2fe;
       font-weight: 800;
-      font-size: 13px;
-      border-radius: 12px;
-      padding: 8px 10px;
+      font-size: 12px;
+      border-radius: 11px;
+      padding: 7px 9px;
     }
-    .top-guide {
+    .top-btn.guide {
       border-color: rgba(52, 211, 153, 0.55);
       background: rgba(16, 185, 129, 0.22);
       color: #d1fae5;
     }
-    .top-recenter:active {
-      background: #38bdf8;
-      color: #082f49;
+    .top-btn.mode {
+      border-color: rgba(250, 204, 21, 0.45);
+      background: rgba(234, 179, 8, 0.16);
+      color: #fef08a;
     }
-    .top-guide:active {
-      background: #34d399;
-      color: #022c22;
-    }
+    .top-btn:active { filter: brightness(1.3); transform: scale(0.96); }
+
     .setup-panel {
       display: flex;
       flex-direction: column;
-      gap: 12px;
-      margin-top: 8px;
+      gap: 10px;
+      margin-top: 4px;
+      overflow-y: auto;
     }
-    .setup-panel.hidden {
-      display: none;
-    }
+    .setup-panel.hidden { display: none; }
     .slots {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 10px;
+      gap: 8px;
     }
     .slot-btn {
-      padding: 14px;
-      border-radius: 16px;
+      padding: 13px;
+      border-radius: 15px;
       border: 2px solid rgba(255,255,255,0.16);
       background: rgba(255,255,255,0.05);
       color: #cbd5e1;
       font-weight: 800;
-      font-size: 15px;
+      font-size: 14px;
     }
-    .slot-btn.active-p1 {
-      background: rgba(6, 182, 212, 0.22);
-      border-color: #22d3ee;
-      color: #cffafe;
-    }
-    .slot-btn.active-p2 {
-      background: rgba(251, 113, 133, 0.22);
-      border-color: #fb7185;
-      color: #ffe4e6;
-    }
+    .slot-btn.active-p1 { background: rgba(6, 182, 212, 0.24); border-color: #22d3ee; color: #cffafe; }
+    .slot-btn.active-p2 { background: rgba(251, 113, 133, 0.24); border-color: #fb7185; color: #ffe4e6; }
     .connect-btn {
       width: 100%;
-      padding: 20px 16px;
+      padding: 18px 16px;
       border: none;
-      border-radius: 20px;
+      border-radius: 18px;
       background: linear-gradient(135deg, #22c55e, #0ea5e9);
       color: #031525;
-      font-size: 18px;
+      font-size: 17px;
       font-weight: 900;
       box-shadow: 0 10px 26px rgba(14, 165, 233, 0.35);
     }
@@ -131,8 +121,8 @@
       background: rgba(255,255,255,0.06);
       border: 1px solid rgba(125,211,252,0.22);
       border-radius: 16px;
-      padding: 12px;
-      font-size: 13px;
+      padding: 10px;
+      font-size: 12px;
       line-height: 1.4;
       color: #e2e8f0;
     }
@@ -140,7 +130,7 @@
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 8px;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
     }
     .demo-card {
       background: rgba(4, 12, 28, 0.55);
@@ -148,17 +138,13 @@
       border-radius: 12px;
       padding: 8px;
       text-align: center;
-      font-size: 12px;
+      font-size: 11.5px;
     }
-    .demo-card b {
-      display: block;
-      color: #7dd3fc;
-      margin-bottom: 4px;
-    }
+    .demo-card b { display: block; color: #7dd3fc; margin-bottom: 4px; }
     @keyframes animChop {
-      0%, 28% { transform: rotate(-32deg) translate(0px, 0px); }
-      45% { transform: rotate(38deg) translate(12px, 6px); }
-      65%, 100% { transform: rotate(-32deg) translate(0px, 0px); }
+      0%, 28% { transform: rotate(-28deg) translate(0px, 0px); }
+      45% { transform: rotate(36deg) translate(12px, 6px); }
+      65%, 100% { transform: rotate(-28deg) translate(0px, 0px); }
     }
     @keyframes animSlashFlash {
       0%, 35% { opacity: 0; }
@@ -171,114 +157,191 @@
       58%, 74% { transform: rotate(90deg); }
       84%, 100% { transform: rotate(-45deg); }
     }
-    .svg-chop-arm {
-      transform-origin: 40px 66px;
-      animation: animChop 1.9s ease-in-out infinite;
-    }
-    .svg-slash-arc {
-      animation: animSlashFlash 1.9s ease-in-out infinite;
-    }
-    .svg-twist-blade {
-      transform-origin: 50px 44px;
-      animation: animTwist 3.2s ease-in-out infinite;
-    }
+    .svg-chop-arm { transform-origin: 40px 66px; animation: animChop 1.7s ease-in-out infinite; }
+    .svg-slash-arc { animation: animSlashFlash 1.7s ease-in-out infinite; }
+    .svg-twist-blade { transform-origin: 50px 44px; animation: animTwist 3.0s ease-in-out infinite; }
+
     .guide-modal {
       position: fixed;
       inset: 0;
       z-index: 50;
-      background: rgba(4, 10, 24, 0.94);
+      background: rgba(4, 10, 24, 0.95);
       display: none;
       flex-direction: column;
       justify-content: center;
-      padding: 18px;
-      gap: 14px;
+      padding: 16px;
+      gap: 12px;
     }
-    .guide-modal.visible {
-      display: flex;
-    }
+    .guide-modal.visible { display: flex; }
     .close-guide-btn {
       width: 100%;
-      padding: 16px;
-      border-radius: 16px;
+      padding: 15px;
+      border-radius: 15px;
       border: none;
       background: linear-gradient(135deg, #38bdf8, #22c55e);
       color: #031525;
       font-weight: 900;
       font-size: 16px;
     }
+
     .play-panel {
       flex: 1;
       display: none;
       flex-direction: column;
-      gap: 10px;
+      gap: 8px;
+      min-height: 0;
     }
-    .play-panel.visible {
+    .play-panel.visible { display: flex; }
+
+    .blade-banner {
       display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      background: rgba(5, 16, 36, 0.72);
+      border: 1px solid rgba(56, 189, 248, 0.28);
+      border-radius: 16px;
+      padding: 8px 12px;
     }
-    .guard-pad {
+    .dial-mini { width: 84px; height: 84px; flex-shrink: 0; }
+    .meters {
       flex: 1;
-      border-radius: 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .meter-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      font-weight: 800;
+      color: #cbd5e1;
+    }
+    .meter-track {
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.1);
+      overflow: hidden;
+    }
+    .meter-fill {
+      height: 100%;
+      width: 100%;
+      border-radius: 999px;
+      transition: width 0.08s linear;
+    }
+    .meter-fill.guard { background: linear-gradient(90deg, #0ea5e9, #38bdf8); }
+    .meter-fill.spirit { background: linear-gradient(90deg, #f59e0b, #fde047); width: 0%; }
+
+    .control-grid {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 1.15fr;
+      gap: 8px;
+      min-height: 0;
+    }
+    .control-grid.one-hand {
+      grid-template-columns: 1fr;
+    }
+    .move-pad {
+      position: relative;
+      border-radius: 24px;
+      border: 2px solid rgba(148, 163, 184, 0.35);
+      background: radial-gradient(circle at 50% 50%, rgba(30, 58, 138, 0.34), rgba(15, 23, 42, 0.85));
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .control-grid.one-hand .move-pad { display: none; }
+    .stick-ring {
+      width: 116px;
+      height: 116px;
+      border-radius: 50%;
+      border: 2px dashed rgba(125, 211, 252, 0.45);
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    .stick-knob {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #7dd3fc, #0284c7);
+      box-shadow: 0 0 18px rgba(56, 189, 248, 0.65);
+      transform: translate(0px, 0px);
+      pointer-events: none;
+    }
+    .pad-hint {
+      position: absolute;
+      bottom: 10px;
+      left: 8px;
+      right: 8px;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 700;
+      color: #93c5fd;
+      pointer-events: none;
+    }
+
+    .guard-pad {
+      border-radius: 24px;
       border: 3px solid rgba(56, 189, 248, 0.55);
-      background: radial-gradient(circle at 50% 45%, rgba(14, 116, 144, 0.42), rgba(12, 34, 68, 0.85));
+      background: radial-gradient(circle at 50% 45%, rgba(14, 116, 144, 0.45), rgba(12, 34, 68, 0.88));
       color: #ffffff;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 14px;
-      padding: 18px;
+      gap: 8px;
+      padding: 12px;
       position: relative;
-      transition: transform 0.08s ease, background 0.1s ease, border-color 0.1s ease;
-      box-shadow: inset 0 0 36px rgba(14, 165, 233, 0.16);
+      transition: transform 0.06s ease, background 0.08s ease, border-color 0.08s ease;
     }
     .guard-pad.pressed {
-      background: radial-gradient(circle at 50% 45%, rgba(56, 189, 248, 0.72), rgba(2, 132, 199, 0.92));
+      background: radial-gradient(circle at 50% 45%, rgba(56, 189, 248, 0.78), rgba(2, 132, 199, 0.94));
       border-color: #ffffff;
       transform: scale(0.985);
-      box-shadow: 0 0 34px rgba(56, 189, 248, 0.45);
+      box-shadow: 0 0 28px rgba(56, 189, 248, 0.50);
     }
-    .dial-wrap {
-      width: 196px;
-      height: 196px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      pointer-events: none;
+    .guard-pad.charged {
+      border-color: #fde047;
+      box-shadow: 0 0 32px rgba(250, 204, 21, 0.55);
     }
-    .pad-title {
-      font-size: 26px;
-      font-weight: 900;
-      letter-spacing: 0.6px;
-      text-align: center;
-      pointer-events: none;
+    .guard-icon { font-size: 38px; pointer-events: none; }
+    .pad-title { font-size: 20px; font-weight: 900; text-align: center; pointer-events: none; }
+    .pad-sub { font-size: 12px; font-weight: 600; color: #bae6fd; text-align: center; line-height: 1.3; pointer-events: none; }
+
+    .bottom-steps {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 6px;
     }
-    .pad-sub {
-      font-size: 14px;
-      font-weight: 600;
-      color: #bae6fd;
-      text-align: center;
-      max-width: 280px;
-      line-height: 1.35;
-      pointer-events: none;
-    }
-    .pose-chip {
-      padding: 6px 14px;
-      border-radius: 999px;
-      background: rgba(0, 0, 0, 0.35);
-      border: 1px solid rgba(255,255,255,0.18);
-      font-size: 13px;
+    .step-btn {
+      padding: 11px 6px;
+      border-radius: 14px;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      background: rgba(15, 23, 42, 0.78);
+      color: #e2e8f0;
       font-weight: 800;
-      letter-spacing: 0.4px;
-      color: #7dd3fc;
-      pointer-events: none;
+      font-size: 12px;
     }
+    .step-btn.thrust {
+      border-color: rgba(52, 211, 153, 0.55);
+      background: rgba(16, 185, 129, 0.22);
+      color: #a7f3d0;
+    }
+    .step-btn:active { background: #38bdf8; color: #041226; }
+
     .telemetry {
       font-family: ui-monospace, monospace;
       font-size: 11px;
       color: #94a3b8;
       background: rgba(0,0,0,0.34);
       border-radius: 10px;
-      padding: 7px 10px;
+      padding: 6px 10px;
       text-align: center;
     }
   </style>
@@ -291,8 +354,9 @@
         <div id="statusBadge" class="badge">Desconectado</div>
       </div>
       <div class="top-btn-group">
-        <button id="guideBtn" class="top-guide" type="button">❔ Guía</button>
-        <button id="recenterBtn" class="top-recenter" type="button">🎯 CENTRAR</button>
+        <button id="modeBtn" class="top-btn mode" type="button">2 Manos</button>
+        <button id="guideBtn" class="top-btn guide" type="button">❔</button>
+        <button id="recenterBtn" class="top-btn" type="button">🎯 CENTRAR</button>
       </div>
     </div>
 
@@ -302,13 +366,13 @@
         <button id="btnP2" class="slot-btn" type="button">Jugador 2 (Coral)</button>
       </div>
 
-      <button id="connectBtn" class="connect-btn" type="button">Conectar y Bloquear Giro</button>
+      <button id="connectBtn" class="connect-btn" type="button">Conectar Sensores 6-Axis y Bloquear Giro</button>
 
       <div id="visualGuideContent" class="tip-box">
         <div class="demo-row">
           <div class="demo-card">
-            <b>1. Postura 45° + Atacar</b>
-            <svg viewBox="0 0 110 86" width="104" height="80">
+            <b>1. Tajo Real o Empuje</b>
+            <svg viewBox="0 0 110 86" width="96" height="74">
               <rect x="86" y="14" width="14" height="22" rx="2" fill="#1e293b" stroke="#94a3b8" stroke-width="2" />
               <text x="93" y="45" fill="#94a3b8" font-size="7" text-anchor="middle">PC</text>
               <g class="svg-chop-arm">
@@ -318,43 +382,65 @@
               </g>
               <path class="svg-slash-arc" d="M 52 10 Q 82 28 74 62" fill="none" stroke="#4ade80" stroke-width="4" stroke-linecap="round" />
             </svg>
-            <div>Apunta 45° al PC y da un <b>corte rápido hacia delante/abajo</b> (o empuje seco).</div>
+            <div>Apunta al PC (~45°). Mueve con <b>velocidad natural de muñeca o brazo</b> para cortar; más rápido = más fuerza.</div>
           </div>
           <div class="demo-card">
-            <b>2. Girar Hoja (4 Ángulos)</b>
-            <svg viewBox="0 0 100 86" width="96" height="80">
+            <b>2. Gira Muñeca y Parry</b>
+            <svg viewBox="0 0 100 86" width="90" height="74">
               <circle cx="50" cy="44" r="32" fill="none" stroke="rgba(125,211,252,0.25)" stroke-width="3" />
               <g class="svg-twist-blade">
                 <rect x="44" y="42" width="12" height="26" rx="3" fill="#0f172a" stroke="#94a3b8" stroke-width="1.5" />
                 <line x1="50" y1="42" x2="50" y2="12" stroke="#38bdf8" stroke-width="5" stroke-linecap="round" />
               </g>
             </svg>
-            <div>Rota la muñeca (<b>| / — \</b>) antes de cortar. Pulsa pantalla = <b>Bloquear (+)</b>.</div>
+            <div>Rotar la muñeca gira la hoja 1:1 <b>sin disparar cortes por error</b>. Pulsa <b>GUARDIA</b> justo antes del impacto = <b>Parry Perfecto</b>.</div>
           </div>
         </div>
-        • <b>Para aturdir (Parry):</b> mantén la pantalla pulsada formando cruz (<b>+</b>) frente al ataque rojo.<br />
-        • <b>Para romper escudo:</b> alinea tu espada igual (<b>=</b>) que el rival y golpea hacia delante.
+        • <b>Moverse / Esquivar:</b> en modo 2 Manos usa el stick izquierdo (desliza rápido = esquiva).<br />
+        • <b>Centrar rápido:</b> apunta hacia el monitor en tu postura cómoda y pulsa <b>🎯 CENTRAR</b> arriba.
       </div>
     </div>
 
     <div id="playPanel" class="play-panel">
-      <div id="guardPad" class="guard-pad" role="button" aria-label="Bloquear">
-        <div class="dial-wrap">
-          <svg viewBox="0 0 200 200" width="196" height="196">
-            <circle cx="100" cy="100" r="88" fill="rgba(4,12,28,0.45)" stroke="rgba(125,211,252,0.35)" stroke-width="4" />
-            <line x1="100" y1="20" x2="100" y2="34" stroke="rgba(255,255,255,0.25)" stroke-width="3" stroke-linecap="round" />
-            <line x1="180" y1="100" x2="166" y2="100" stroke="rgba(255,255,255,0.25)" stroke-width="3" stroke-linecap="round" />
-            <line x1="20" y1="100" x2="34" y2="100" stroke="rgba(255,255,255,0.25)" stroke-width="3" stroke-linecap="round" />
-            <g id="dialBlade" transform="rotate(0 100 100)">
-              <line x1="100" y1="164" x2="100" y2="26" stroke="#38bdf8" stroke-width="11" stroke-linecap="round" />
-              <line x1="100" y1="145" x2="100" y2="29" stroke="#ffffff" stroke-width="4" stroke-linecap="round" />
-              <line x1="80" y1="138" x2="120" y2="138" stroke="#f8fafc" stroke-width="6" stroke-linecap="round" />
-            </g>
-          </svg>
+      <div class="blade-banner">
+        <svg class="dial-mini" viewBox="0 0 200 200">
+          <circle cx="100" cy="100" r="88" fill="rgba(4,12,28,0.65)" stroke="rgba(125,211,252,0.4)" stroke-width="5" />
+          <line x1="100" y1="22" x2="100" y2="38" stroke="rgba(255,255,255,0.25)" stroke-width="4" stroke-linecap="round" />
+          <line x1="178" y1="100" x2="162" y2="100" stroke="rgba(255,255,255,0.25)" stroke-width="4" stroke-linecap="round" />
+          <line x1="22" y1="100" x2="38" y2="100" stroke="rgba(255,255,255,0.25)" stroke-width="4" stroke-linecap="round" />
+          <g id="dialBlade" transform="rotate(0 100 100)">
+            <line id="dialCore" x1="100" y1="164" x2="100" y2="26" stroke="#38bdf8" stroke-width="13" stroke-linecap="round" />
+            <line x1="100" y1="145" x2="100" y2="29" stroke="#ffffff" stroke-width="4" stroke-linecap="round" />
+            <line x1="78" y1="138" x2="122" y2="138" stroke="#f8fafc" stroke-width="7" stroke-linecap="round" />
+          </g>
+        </svg>
+        <div class="meters">
+          <div class="meter-label"><span id="poseChip">HOJA: VERTICAL | (0°)</span><span id="spiritChip">ESPÍRITU: 0%</span></div>
+          <div class="meter-track"><div id="spiritFill" class="meter-fill spirit"></div></div>
+          <div class="meter-label"><span>POSTURA / ESCUDO</span><span id="guardPct">100%</span></div>
+          <div class="meter-track"><div id="guardFill" class="meter-fill guard"></div></div>
         </div>
-        <div id="poseChip" class="pose-chip">POSTURA: VERTICAL |</div>
-        <div id="padTitle" class="pad-title">TOCA PARA BLOQUEAR</div>
-        <div class="pad-sub">Mantén el pulgar en cualquier sitio para Guardia Activa, o suelta y sostén el ángulo para Autobloqueo</div>
+      </div>
+
+      <div id="controlGrid" class="control-grid">
+        <div id="movePad" class="move-pad">
+          <div class="stick-ring">
+            <div id="stickKnob" class="stick-knob"></div>
+          </div>
+          <div class="pad-hint">Mover • Desliza rápido = Esquivar</div>
+        </div>
+
+        <div id="guardPad" class="guard-pad" role="button" aria-label="Bloquear">
+          <div id="guardIcon" class="guard-icon">🛡️</div>
+          <div id="padTitle" class="pad-title">GUARDIA</div>
+          <div class="pad-sub">Mantén para cubrir.<br />Pulsa justo al golpe = Parry</div>
+        </div>
+      </div>
+
+      <div class="bottom-steps">
+        <button id="dodgeLeftBtn" class="step-btn" type="button">◀ Esquiva</button>
+        <button id="thrustBtn" class="step-btn thrust" type="button">⚡ Estocada</button>
+        <button id="dodgeRightBtn" class="step-btn" type="button">Esquiva ▶</button>
       </div>
     </div>
 
@@ -362,7 +448,7 @@
   </div>
 
   <div id="guideOverlay" class="guide-modal">
-    <div style="font-weight:900; font-size:20px; text-align:center; color:#7dd3fc;">Cómo sujetar el móvil y gestos</div>
+    <div style="font-weight:900; font-size:19px; text-align:center; color:#7dd3fc;">Guía Rápida — Espada Realista 1:1</div>
     <div id="guideModalSlot"></div>
     <button id="closeGuideBtn" class="close-guide-btn" type="button">Entendido — Seguir jugando</button>
   </div>
@@ -372,32 +458,69 @@
     const setupPanel = document.getElementById("setupPanel");
     const playPanel = document.getElementById("playPanel");
     const connectBtn = document.getElementById("connectBtn");
+    const modeBtn = document.getElementById("modeBtn");
+    const controlGrid = document.getElementById("controlGrid");
+    const movePad = document.getElementById("movePad");
+    const stickKnob = document.getElementById("stickKnob");
     const guardPad = document.getElementById("guardPad");
+    const guardIcon = document.getElementById("guardIcon");
     const padTitle = document.getElementById("padTitle");
     const poseChip = document.getElementById("poseChip");
+    const spiritChip = document.getElementById("spiritChip");
+    const spiritFill = document.getElementById("spiritFill");
+    const guardPct = document.getElementById("guardPct");
+    const guardFill = document.getElementById("guardFill");
     const dialBlade = document.getElementById("dialBlade");
+    const dialCore = document.getElementById("dialCore");
     const recenterBtn = document.getElementById("recenterBtn");
     const guideBtn = document.getElementById("guideBtn");
     const guideOverlay = document.getElementById("guideOverlay");
     const guideModalSlot = document.getElementById("guideModalSlot");
     const visualGuideContent = document.getElementById("visualGuideContent");
     const closeGuideBtn = document.getElementById("closeGuideBtn");
+    const dodgeLeftBtn = document.getElementById("dodgeLeftBtn");
+    const thrustBtn = document.getElementById("thrustBtn");
+    const dodgeRightBtn = document.getElementById("dodgeRightBtn");
     const btnP1 = document.getElementById("btnP1");
     const btnP2 = document.getElementById("btnP2");
     const telemetryEl = document.getElementById("telemetry");
 
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    const accelSign = isIOS ? -1.0 : 1.0;
+
     let slot = 0;
+    let twoHandMode = true;
     let ws = null;
     let sensorsReady = false;
     let guardPressed = false;
+    let guardPointerId = null;
     let recenterPulse = false;
-    let visualRollRef = 0;
-    let lastTapTs = 0;
+    let dodgePulse = false;
+    let thrustPulse = false;
+    let seqCounter = 0;
+
+    let movePointerId = null;
+    let moveOrigin = { x: 0, y: 0, t: 0 };
+    let moveVec = { x: 0, y: 0 };
+
+    let serverRollDeg = null;
+    let serverSpirit = 0;
+    let serverGuardMeter = 100;
 
     let latest = {
       gx: 0, gy: 0, gz: 0,
       ax: 0, ay: 0, az: 9.81,
-      lx: 0, ly: 0, lz: 0
+      lx: 0, ly: 0, lz: 0,
+      hasLinear: false
+    };
+
+    // High-frequency accumulator between WS frames so fast flicks never vanish
+    let accum = {
+      dx: 0, dy: 0, dz: 0, dt: 0, samples: 0,
+      pgx: 0, pgy: 0, pgz: 0, peakRot: 0,
+      plx: 0, ply: 0, plz: 0, peakLin: 0,
+      lastTs: 0, hz: 0, hzWindowCount: 0, hzWindowStart: 0
     };
 
     function updateSlotUI() {
@@ -407,11 +530,21 @@
     btnP1.addEventListener("click", () => { slot = 0; updateSlotUI(); });
     btnP2.addEventListener("click", () => { slot = 1; updateSlotUI(); });
 
+    modeBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      twoHandMode = !twoHandMode;
+      controlGrid.classList.toggle("one-hand", !twoHandMode);
+      modeBtn.textContent = twoHandMode ? "2 Manos" : "1 Mano";
+      moveVec = { x: 0, y: 0 };
+      stickKnob.style.transform = "translate(0px, 0px)";
+    });
+
     function setGuardState(active) {
       if (guardPressed === active) return;
       guardPressed = active;
       guardPad.classList.toggle("pressed", active);
-      padTitle.textContent = active ? "🛡️ BLOQUEANDO" : "TOCA PARA BLOQUEAR";
+      padTitle.textContent = active ? "BLOQUEANDO" : "GUARDIA";
+      guardIcon.textContent = active ? "🔵" : "🛡️";
       if (active && navigator.vibrate) {
         try { navigator.vibrate(14); } catch (_) {}
       }
@@ -419,31 +552,86 @@
 
     guardPad.addEventListener("pointerdown", (e) => {
       e.preventDefault();
-      const now = performance.now();
-      if (now - lastTapTs < 240) {
-        triggerRecenter();
+      if (guardPointerId === null) {
+        guardPointerId = e.pointerId;
+        try { guardPad.setPointerCapture(e.pointerId); } catch (_) {}
       }
-      lastTapTs = now;
       setGuardState(true);
     });
-    const releaseGuard = (e) => {
+    const endGuard = (e) => {
+      if (guardPointerId !== null && e.pointerId !== guardPointerId) return;
       e.preventDefault();
+      guardPointerId = null;
       setGuardState(false);
     };
-    guardPad.addEventListener("pointerup", releaseGuard);
-    guardPad.addEventListener("pointercancel", releaseGuard);
-    guardPad.addEventListener("pointerleave", releaseGuard);
+    guardPad.addEventListener("pointerup", endGuard);
+    guardPad.addEventListener("pointercancel", endGuard);
+
+    // Virtual stick + swipe-dash for Left Hand
+    movePad.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      if (movePointerId === null) {
+        movePointerId = e.pointerId;
+        try { movePad.setPointerCapture(e.pointerId); } catch (_) {}
+        moveOrigin = { x: e.clientX, y: e.clientY, t: performance.now() };
+      }
+    });
+    movePad.addEventListener("pointermove", (e) => {
+      if (e.pointerId !== movePointerId) return;
+      e.preventDefault();
+      const maxR = 46;
+      const dx = e.clientX - moveOrigin.x;
+      const dy = e.clientY - moveOrigin.y;
+      const dist = Math.hypot(dx, dy);
+      const scale = dist > maxR ? maxR / dist : 1.0;
+      const cx = dx * scale;
+      const cy = dy * scale;
+      stickKnob.style.transform = `translate(${cx.toFixed(1)}px, ${cy.toFixed(1)}px)`;
+      moveVec.x = Math.max(-1, Math.min(1, cx / maxR));
+      moveVec.y = Math.max(-1, Math.min(1, cy / maxR));
+
+      const dtMs = performance.now() - moveOrigin.t;
+      if (dist > 38 && dtMs < 130 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+        dodgePulse = true;
+        moveOrigin.t = performance.now() + 300;
+      }
+    });
+    const endMove = (e) => {
+      if (e.pointerId !== movePointerId) return;
+      e.preventDefault();
+      movePointerId = null;
+      moveVec = { x: 0, y: 0 };
+      stickKnob.style.transform = "translate(0px, 0px)";
+    };
+    movePad.addEventListener("pointerup", endMove);
+    movePad.addEventListener("pointercancel", endMove);
+
+    dodgeLeftBtn.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      moveVec = { x: -1, y: 0 };
+      dodgePulse = true;
+      setTimeout(() => { if (movePointerId === null) moveVec = { x: 0, y: 0 }; }, 140);
+    });
+    dodgeRightBtn.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      moveVec = { x: 1, y: 0 };
+      dodgePulse = true;
+      setTimeout(() => { if (movePointerId === null) moveVec = { x: 0, y: 0 }; }, 140);
+    });
+    thrustBtn.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      thrustPulse = true;
+      if (navigator.vibrate) try { navigator.vibrate(20); } catch (_) {}
+    });
 
     function triggerRecenter() {
       recenterPulse = true;
-      const sag = Math.hypot(latest.ay, latest.az) || 1;
-      visualRollRef = Math.atan2(-latest.ax, sag);
+      serverRollDeg = 0;
       if (navigator.vibrate) {
-        try { navigator.vibrate([18, 30, 18]); } catch (_) {}
+        try { navigator.vibrate([16, 28, 16]); } catch (_) {}
       }
-      telemetryEl.textContent = "Espada centrada.";
+      telemetryEl.textContent = "Centro 3D calibrado.";
     }
-
     recenterBtn.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -481,7 +669,13 @@
     }
 
     document.addEventListener("visibilitychange", async () => {
-      if (document.visibilityState === "visible" && ws && ws.readyState === WebSocket.OPEN) {
+      if (document.visibilityState === "hidden") {
+        guardPointerId = null;
+        movePointerId = null;
+        moveVec = { x: 0, y: 0 };
+        stickKnob.style.transform = "translate(0px, 0px)";
+        setGuardState(false);
+      } else if (document.visibilityState === "visible" && ws && ws.readyState === WebSocket.OPEN) {
         await lockPortraitAndFullscreen();
         if ("wakeLock" in navigator) {
           try { await navigator.wakeLock.request("screen"); } catch (_) {}
@@ -497,20 +691,59 @@
 
       if (!sensorsReady) {
         sensorsReady = true;
+        accum.hzWindowStart = performance.now();
         window.addEventListener("devicemotion", (e) => {
+          const nowTs = performance.now();
+          const rawDt = accum.lastTs > 0 ? (nowTs - accum.lastTs) / 1000.0 : 0.016;
+          const dt = Math.max(0.002, Math.min(0.05, rawDt));
+          accum.lastTs = nowTs;
+
+          accum.hzWindowCount++;
+          if (nowTs - accum.hzWindowStart >= 500) {
+            accum.hz = Math.round(accum.hzWindowCount * 1000.0 / (nowTs - accum.hzWindowStart));
+            accum.hzWindowCount = 0;
+            accum.hzWindowStart = nowTs;
+          }
+
           const r = e.rotationRate || {};
           const ag = e.accelerationIncludingGravity || {};
           const ac = e.acceleration || {};
           const d2r = Math.PI / 180.0;
-          latest.gx = (r.beta || 0) * d2r;
-          latest.gy = (r.alpha || 0) * d2r;
-          latest.gz = (r.gamma || 0) * d2r;
-          latest.ax = ag.x || 0;
-          latest.ay = ag.y || 0;
-          latest.az = ag.z || 0;
-          latest.lx = ac.x || 0;
-          latest.ly = ac.y || 0;
-          latest.lz = ac.z || 0;
+
+          const gx = (r.beta || 0) * d2r;
+          const gy = (r.alpha || 0) * d2r;
+          const gz = (r.gamma || 0) * d2r;
+          const rotMag = Math.hypot(gx, gy, gz);
+
+          const ax = (ag.x || 0) * accelSign;
+          const ay = (ag.y || 0) * accelSign;
+          const az = (ag.z || 0) * accelSign;
+
+          const hasAc = ac && typeof ac.x === "number" && typeof ac.y === "number" && typeof ac.z === "number";
+          const lx = hasAc ? (ac.x * accelSign) : 0;
+          const ly = hasAc ? (ac.y * accelSign) : 0;
+          const lz = hasAc ? (ac.z * accelSign) : 0;
+          const linMag = Math.hypot(lx, ly, lz);
+
+          latest.gx = gx; latest.gy = gy; latest.gz = gz;
+          latest.ax = ax; latest.ay = ay; latest.az = az;
+          latest.lx = lx; latest.ly = ly; latest.lz = lz;
+          latest.hasLinear = hasAc;
+
+          accum.dx += gx * dt;
+          accum.dy += gy * dt;
+          accum.dz += gz * dt;
+          accum.dt += dt;
+          accum.samples++;
+
+          if (rotMag >= accum.peakRot) {
+            accum.peakRot = rotMag;
+            accum.pgx = gx; accum.pgy = gy; accum.pgz = gz;
+          }
+          if (linMag >= accum.peakLin) {
+            accum.peakLin = linMag;
+            accum.plx = lx; accum.ply = ly; accum.plz = lz;
+          }
         });
       }
     }
@@ -544,7 +777,23 @@
         try {
           const msg = JSON.parse(ev.data);
           if (msg.rumble && navigator.vibrate) {
-            navigator.vibrate(Math.min(200, Math.max(25, msg.rumble | 0)));
+            navigator.vibrate(Math.min(220, Math.max(20, msg.rumble | 0)));
+          }
+          if (Array.isArray(msg.v) && navigator.vibrate) {
+            navigator.vibrate(msg.v);
+          }
+          if (typeof msg.roll === "number") serverRollDeg = msg.roll;
+          if (typeof msg.spirit === "number") {
+            serverSpirit = msg.spirit;
+            spiritFill.style.width = `${Math.max(0, Math.min(100, serverSpirit))}%`;
+            spiritChip.textContent = serverSpirit >= 100 ? "⚡ ESPADA MAESTRA" : `ESPÍRITU: ${Math.round(serverSpirit)}%`;
+            guardPad.classList.toggle("charged", serverSpirit >= 100);
+            dialCore.setAttribute("stroke", serverSpirit >= 100 ? "#fde047" : "#38bdf8");
+          }
+          if (typeof msg.guard === "number") {
+            serverGuardMeter = msg.guard;
+            guardFill.style.width = `${Math.max(0, Math.min(100, serverGuardMeter))}%`;
+            guardPct.textContent = `${Math.round(serverGuardMeter)}%`;
           }
         } catch (_) {}
       };
@@ -571,38 +820,50 @@
     }
 
     setInterval(() => {
-      const sag = Math.hypot(latest.ay, latest.az) || 1;
-      let rawRoll = Math.atan2(-latest.ax, sag) - visualRollRef;
-      if (rawRoll > Math.PI) rawRoll -= Math.PI * 2;
-      if (rawRoll < -Math.PI) rawRoll += Math.PI * 2;
-      const deg = Math.max(-95, Math.min(95, rawRoll * 180 / Math.PI));
+      const deg = serverRollDeg !== null ? Math.max(-105, Math.min(105, serverRollDeg)) : 0;
       dialBlade.setAttribute("transform", `rotate(${deg.toFixed(1)} 100 100)`);
-      poseChip.textContent = `POSTURA: ${describePose(deg)} (${deg.toFixed(0)}°)`;
+      poseChip.textContent = `HOJA: ${describePose(deg)} (${deg.toFixed(0)}°)`;
 
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+      const hasSamples = accum.samples > 0 && accum.dt > 0.0005;
+      const sendDt = hasSamples ? accum.dt : 0.016;
+      const avgGx = hasSamples ? accum.dx / sendDt : latest.gx;
+      const avgGy = hasSamples ? accum.dy / sendDt : latest.gy;
+      const avgGz = hasSamples ? accum.dz / sendDt : latest.gz;
+
       const payload = {
         s: slot,
-        g: [
-          Number(latest.gx.toFixed(3)),
-          Number(latest.gy.toFixed(3)),
-          Number(latest.gz.toFixed(3))
+        q: ++seqCounter,
+        dt: Number(sendDt.toFixed(4)),
+        g: [Number(avgGx.toFixed(3)), Number(avgGy.toFixed(3)), Number(avgGz.toFixed(3))],
+        pg: [
+          Number((hasSamples ? accum.pgx : latest.gx).toFixed(3)),
+          Number((hasSamples ? accum.pgy : latest.gy).toFixed(3)),
+          Number((hasSamples ? accum.pgz : latest.gz).toFixed(3))
         ],
-        a: [
-          Number(latest.ax.toFixed(3)),
-          Number(latest.ay.toFixed(3)),
-          Number(latest.az.toFixed(3))
-        ],
+        a: [Number(latest.ax.toFixed(3)), Number(latest.ay.toFixed(3)), Number(latest.az.toFixed(3))],
         l: [
-          Number(latest.lx.toFixed(3)),
-          Number(latest.ly.toFixed(3)),
-          Number(latest.lz.toFixed(3))
+          Number((hasSamples && accum.peakLin > 0.5 ? accum.plx : latest.lx).toFixed(3)),
+          Number((hasSamples && accum.peakLin > 0.5 ? accum.ply : latest.ly).toFixed(3)),
+          Number((hasSamples && accum.peakLin > 0.5 ? accum.plz : latest.lz).toFixed(3))
         ],
-        b: (guardPressed ? 1 : 0) | (recenterPulse ? 4 : 0)
+        hl: latest.hasLinear ? 1 : 0,
+        m: [Number(moveVec.x.toFixed(2)), Number(moveVec.y.toFixed(2))],
+        b: (guardPressed ? 1 : 0) | (recenterPulse ? 4 : 0) | (dodgePulse ? 8 : 0) | (thrustPulse ? 16 : 0)
       };
       recenterPulse = false;
+      dodgePulse = false;
+      thrustPulse = false;
+
+      accum.dx = 0; accum.dy = 0; accum.dz = 0; accum.dt = 0; accum.samples = 0;
+      accum.pgx = 0; accum.pgy = 0; accum.pgz = 0; accum.peakRot = 0;
+      accum.plx = 0; accum.ply = 0; accum.plz = 0; accum.peakLin = 0;
+
       ws.send(JSON.stringify(payload));
+      const hzTxt = accum.hz > 0 ? `Sensor ${accum.hz}Hz` : "⚠️ Sin eventos IMU";
       telemetryEl.textContent =
-        `J${slot + 1} | 60Hz OK | Hoja: ${deg.toFixed(0)}° | Guardia: ${guardPressed ? "ACTIVA" : "Auto"}`;
+        `J${slot + 1} | ${hzTxt} | Hoja ${deg.toFixed(0)}° | ${guardPressed ? "GUARDIA" : "Libre"}`;
     }, 16);
   </script>
 </body>
