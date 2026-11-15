@@ -261,18 +261,18 @@ func _compute_tip_and_detect(delta: float, eff_gyro: Vector3, world_lin_est: Vec
 	var roll_rate := absf(eff_gyro.z)
 	# Treat the phone as the sword pommel/hilt: rotating/flipping it along its own shaft ("darle la vuelta")
 	# spins blade edge angle (roll_rate) and causes gravity-filter lag & minor wobble, NEVER an attack slash!
-	var is_twist_motion := (roll_rate > 1.45) and (tip_speed_3d < maxf(4.6, roll_rate * 0.95))
+	var is_twist_motion := (roll_rate > 1.25) and (tip_speed_3d < maxf(5.2, roll_rate * 1.15))
 	if is_twist_motion:
-		_twist_guard_timer = 0.16
+		_twist_guard_timer = 0.22
 		_backswing_timer = 0.0
 
 	var twist_damp := _twist_guard_timer > 0.0
 	var eff_tip_speed := tip_speed_3d
 	if is_twist_motion:
-		eff_tip_speed = tip_speed_3d * 0.28
-	elif twist_damp and tip_speed_3d < 5.6:
+		eff_tip_speed = 0.0
+	elif twist_damp and tip_speed_3d < 5.8:
 		# Prevent Android gravity-filter lag & wrist-brake wobble right after flipping the phone
-		eff_tip_speed = tip_speed_3d * 0.36
+		eff_tip_speed = tip_speed_3d * 0.25
 		_backswing_timer = 0.0
 	else:
 		var lin_cut_boost := maxf(0.0, lin_perp.length() - 5.2) * 0.34

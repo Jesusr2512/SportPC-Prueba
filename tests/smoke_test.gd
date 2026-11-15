@@ -447,16 +447,20 @@ func _run_checks() -> void:
 	hub._process(0.016)
 	_check(hub.slots[0].move_axis == Vector2.ZERO, "Mobile move_axis must reset to ZERO immediately after dodge")
 
-	# Verify mobile rotation (gz = -r.alpha) spins blade roll without attacking, while gy = r.gamma slashes horizontally
+	# Verify mobile rotation (gz = r.beta) spins blade roll without attacking, gy = r.gamma slashes horizontally, and gx = r.alpha slashes vertically
 	hub.slots[0].fusion.recenter()
 	for q_i in range(5, 10):
-		hub._on_mobile_telemetry(999, {"s": 0, "q": q_i, "dt": 0.016, "g": [0.0, 0.0, 6.2], "pg": [0.0, 0.0, 6.2], "a": [0.0, 9.81, 0.0], "l": [0.0, 0.0, 0.0], "hl": 1, "d": 0, "m": [0.0, 0.0], "b": 0})
+		hub._on_mobile_telemetry(999, {"s": 0, "q": q_i, "dt": 0.016, "g": [1.8, 1.5, 8.5], "pg": [1.8, 1.5, 8.5], "a": [0.0, 0.0, 9.81], "l": [0.0, 0.0, 0.0], "hl": 1, "d": 0, "m": [0.0, 0.0], "b": 0})
 		hub._process(0.016)
-		_check(not hub.slots[0].fusion.just_swung, "Mobile rotation (gz) must NEVER trigger left-right attack")
+		_check(not hub.slots[0].fusion.just_swung, "Mobile rotation (gz = r.beta) must NEVER trigger attack")
 	hub.slots[0].fusion.recenter()
-	hub._on_mobile_telemetry(999, {"s": 0, "q": 10, "dt": 0.016, "g": [0.0, -5.8, 0.0], "pg": [0.0, -5.8, 0.0], "a": [0.0, 9.81, 0.0], "l": [0.0, 0.0, 0.0], "hl": 1, "d": 0, "m": [0.0, 0.0], "b": 0})
+	hub._on_mobile_telemetry(999, {"s": 0, "q": 10, "dt": 0.016, "g": [0.0, -5.8, 0.0], "pg": [0.0, -5.8, 0.0], "a": [0.0, 0.0, 9.81], "l": [0.0, 0.0, 0.0], "hl": 1, "d": 0, "m": [0.0, 0.0], "b": 0})
 	hub._process(0.016)
 	_check(hub.slots[0].fusion.just_swung and hub.slots[0].fusion.last_slash_dir.x > 0.7, "Mobile horizontal swing (gy = r.gamma) must trigger left-to-right slash")
+	hub.slots[0].fusion.recenter()
+	hub._on_mobile_telemetry(999, {"s": 0, "q": 11, "dt": 0.016, "g": [-5.8, 0.0, 0.0], "pg": [-5.8, 0.0, 0.0], "a": [0.0, 0.0, 9.81], "l": [0.0, 0.0, 0.0], "hl": 1, "d": 0, "m": [0.0, 0.0], "b": 0})
+	hub._process(0.016)
+	_check(hub.slots[0].fusion.just_swung and hub.slots[0].fusion.last_slash_dir.y > 0.7, "Mobile vertical swing (gx = r.alpha) must trigger up-to-down slash")
 	hub._on_mobile_disconnected(999)
 	if _failed: return
 	print("OK End-to-End Android Mobile Telemetry (Thrust / Lateral Dodge / Idle Zero Walk)")

@@ -898,9 +898,9 @@
           const ac = e.acceleration || {};
           const d2r = Math.PI / 180.0;
 
-          const gx = (r.beta || 0) * d2r;
+          const gx = (r.alpha || 0) * d2r;
           const gy = (r.gamma || 0) * d2r;
-          const gz = -(r.alpha || 0) * d2r;
+          const gz = (r.beta || 0) * d2r;
           const rotMag = Math.hypot(gx, gy, gz);
           const sweepMag = Math.hypot(gx, gy);
 
