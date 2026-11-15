@@ -132,18 +132,22 @@ text = "J2"
 
 [node name="RecenterP1" type="Button" parent="UI/HUD/BottomCard/BottomInfo"]
 layout_mode = 2
+focus_mode = 0
 text = "Centrar J1 (R)"
 
 [node name="RecenterP2" type="Button" parent="UI/HUD/BottomCard/BottomInfo"]
 layout_mode = 2
+focus_mode = 0
 text = "Centrar J2"
 
 [node name="GuideBtn" type="Button" parent="UI/HUD/BottomCard/BottomInfo"]
 layout_mode = 2
+focus_mode = 0
 text = "❔ Guía 3D"
 
 [node name="MenuBtn" type="Button" parent="UI/HUD/BottomCard/BottomInfo"]
 layout_mode = 2
+focus_mode = 0
 text = "Menú"
 
 [node name="CalibPanel" type="PanelContainer" parent="UI"]
@@ -186,6 +190,7 @@ show_percentage = false
 [node name="CalibConfirmBtn" type="Button" parent="UI/CalibPanel/VBox"]
 layout_mode = 2
 custom_minimum_size = Vector2(0, 44)
+focus_mode = 0
 text = "Centrar Ahora y Empezar (Espacio / Bloquear)"
 
 [node name="VictoryPanel" type="PanelContainer" parent="UI"]
@@ -215,11 +220,13 @@ text = "¡Victoria!"
 [node name="RematchBtn" type="Button" parent="UI/VictoryPanel/VBox"]
 layout_mode = 2
 custom_minimum_size = Vector2(0, 48)
+focus_mode = 0
 text = "Revancha"
 
 [node name="MenuReturnBtn" type="Button" parent="UI/VictoryPanel/VBox"]
 layout_mode = 2
 custom_minimum_size = Vector2(0, 44)
+focus_mode = 0
 text = "Volver al Menú"
 
 [connection signal="pressed" from="UI/HUD/BottomCard/BottomInfo/RecenterP1" to="." method="_on_recenter_p1_pressed"]

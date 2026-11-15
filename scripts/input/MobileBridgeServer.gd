@@ -128,11 +128,13 @@ func _process(_delta: float) -> void:
 			"tcp": tcp,
 			"tls": tls,
 			"mode": "http",
-			"http_buf": "",
+			"http_buf": PackedByteArray(),
 			"ws_buf": PackedByteArray(),
 			"frag_buf": PackedByteArray(),
 			"frag_opcode": 0,
 			"out_buf": PackedByteArray(),
+			"cid": "",
+			"remote_ip": tcp.get_connected_host(),
 			"last_seen": now_init,
 			"last_ping": now_init
 		}
@@ -186,24 +188,48 @@ func _process(_delta: float) -> void:
 		if not got_data:
 			if p["mode"] == "ws":
 				var idle := now - int(p["last_seen"])
-				if idle > 14000:
+				if idle > 6500:
 					to_remove.append(id)
-				elif idle > 3500 and now - int(p["last_ping"]) > 3500:
+				elif idle > 2500 and now - int(p["last_ping"]) > 2500:
 					p["last_ping"] = now
 					_queue_ws_frame(p, 0x89, PackedByteArray())
 			elif p["mode"] == "http" and now - int(p["last_seen"]) > 20000:
 				to_remove.append(id)
 
 	for id in to_remove:
-		if not _peers.has(id):
+		_disconnect_peer(id)
+
+
+func _disconnect_peer(id: int) -> void:
+	if not _peers.has(id):
+		return
+	var p: Dictionary = _peers[id]
+	var was_ws: bool = str(p.get("mode", "")) == "ws"
+	var tls: StreamPeerTLS = p["tls"]
+	tls.disconnect_from_stream()
+	_peers.erase(id)
+	if was_ws:
+		peer_disconnected.emit(id)
+
+
+func get_peer_remote_ip(peer_id: int) -> String:
+	if not _peers.has(peer_id):
+		return ""
+	return str(_peers[peer_id].get("remote_ip", ""))
+
+
+func evict_client_id(cid: String, except_id: int = -1) -> void:
+	if cid.is_empty():
+		return
+	var stale: Array[int] = []
+	for id in _peers.keys():
+		if int(id) == except_id:
 			continue
 		var p: Dictionary = _peers[id]
-		var was_ws: bool = str(p.get("mode", "")) == "ws"
-		var tls: StreamPeerTLS = p["tls"]
-		tls.disconnect_from_stream()
-		_peers.erase(id)
-		if was_ws:
-			peer_disconnected.emit(id)
+		if str(p.get("mode", "")) == "ws" and str(p.get("cid", "")) == cid:
+			stale.append(int(id))
+	for id in stale:
+		_disconnect_peer(id)
 
 
 func _queue_bytes(p: Dictionary, bytes: PackedByteArray) -> void:
@@ -238,15 +264,25 @@ func _flush_out_buf(p: Dictionary) -> bool:
 	return true
 
 
-func _process_http(id: int, p: Dictionary, chunk: PackedByteArray) -> bool:
-	p["http_buf"] += chunk.get_string_from_utf8()
-	var header_end: int = p["http_buf"].find("\r\n\r\n")
-	if header_end == -1:
-		return p["http_buf"].length() <= 16384
+func _find_http_header_end(buf: PackedByteArray) -> int:
+	var n := buf.size()
+	for i in range(n - 3):
+		if buf[i] == 13 and buf[i + 1] == 10 and buf[i + 2] == 13 and buf[i + 3] == 10:
+			return i
+	return -1
 
-	var raw_headers: String = p["http_buf"].substr(0, header_end)
-	var rest_str: String = str(p["http_buf"]).substr(header_end + 4)
-	p["http_buf"] = rest_str
+
+func _process_http(id: int, p: Dictionary, chunk: PackedByteArray) -> bool:
+	var http_buf: PackedByteArray = p["http_buf"]
+	http_buf.append_array(chunk)
+	var header_end := _find_http_header_end(http_buf)
+	if header_end == -1:
+		p["http_buf"] = http_buf
+		return http_buf.size() <= 16384
+
+	var raw_headers: String = http_buf.slice(0, header_end).get_string_from_utf8()
+	var rest_bytes: PackedByteArray = http_buf.slice(header_end + 4)
+	p["http_buf"] = rest_bytes
 
 	var ws_key := ""
 	var is_ws := false
@@ -267,12 +303,13 @@ func _process_http(id: int, p: Dictionary, chunk: PackedByteArray) -> bool:
 		)
 		_queue_bytes(p, reply.to_utf8_buffer())
 		p["mode"] = "ws"
-		p["http_buf"] = ""
-		if not rest_str.is_empty():
-			return _process_ws(id, p, rest_str.to_utf8_buffer())
+		p["http_buf"] = PackedByteArray()
+		if not rest_bytes.is_empty():
+			return _process_ws(id, p, rest_bytes)
 		return true
 
-	_load_html()
+	if _html_bytes.is_empty():
+		_load_html()
 	var req_line := raw_headers.split("\r\n")[0]
 	if req_line.begins_with("GET /favicon.ico"):
 		_queue_bytes(p, "HTTP/1.1 204 No Content\r\nConnection: keep-alive\r\nContent-Length: 0\r\n\r\n".to_utf8_buffer())
@@ -331,6 +368,8 @@ func _process_ws(id: int, p: Dictionary, chunk: PackedByteArray) -> bool:
 		buf = buf.slice(offset + payload_len)
 
 		if opcode == 0x8:
+			_queue_ws_frame(p, 0x88, PackedByteArray())
+			_flush_out_buf(p)
 			p["ws_buf"] = buf
 			return false
 		elif opcode == 0x9:
@@ -362,6 +401,11 @@ func _process_ws(id: int, p: Dictionary, chunk: PackedByteArray) -> bool:
 func _handle_ws_message(id: int, payload: PackedByteArray) -> void:
 	var parsed = JSON.parse_string(payload.get_string_from_utf8())
 	if typeof(parsed) == TYPE_DICTIONARY:
+		if parsed.has("cid"):
+			var cid := str(parsed["cid"]).strip_edges()
+			if not cid.is_empty() and _peers.has(id):
+				_peers[id]["cid"] = cid
+				evict_client_id(cid, id)
 		telemetry_received.emit(id, parsed)
 
 

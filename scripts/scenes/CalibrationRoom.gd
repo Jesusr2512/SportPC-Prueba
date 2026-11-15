@@ -90,6 +90,7 @@ func _build_stage() -> void:
 	_coach_avatar = AVATAR_SCENE.instantiate() as AvatarFighter
 	_coach_avatar.fighter_name = "Instructor"
 	_coach_avatar.team_color = Color(0.10, 0.86, 0.75)
+	_coach_avatar.silent_sfx = true
 	stage_root.add_child(_coach_avatar)
 	_coach_avatar.configure_stage(GameConfig.arena_stage, 4.0)
 	_coach_avatar.reset_for_round(Vector3(-1.45, 0.0, -0.35), Vector2(0.15, -0.98))
@@ -508,7 +509,9 @@ func _update_sparring_dummy(delta: float) -> void:
 
 
 func _on_live_slash_impact(_att: AvatarFighter, slash_dir: Vector2, power: float, atk_type: int) -> void:
-	if _dummy_avatar == null:
+	if _dummy_avatar == null or _live_avatar == null:
+		return
+	if _live_avatar.position.distance_to(_dummy_avatar.position) > 3.2:
 		return
 	_dummy_hits += 1
 	var mid := (_live_avatar.position + _dummy_avatar.position) * 0.5 + Vector3(0.0, 1.05, 0.0)

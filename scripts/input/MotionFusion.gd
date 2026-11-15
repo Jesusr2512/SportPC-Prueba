@@ -62,6 +62,7 @@ var _backswing_dir: Vector2 = Vector2.ZERO
 var _backswing_timer: float = 0.0
 var _thrust_rearmed: bool = true
 var _twist_guard_timer: float = 0.0
+var _lin_perp_scaled: float = 0.0
 
 
 func reset_pose() -> void:
@@ -135,7 +136,7 @@ func start_bias_calibration(sample_frames: int = 25) -> void:
 	_bias_count = 0
 
 
-func update(delta: float, raw_gyro: Vector3, raw_accel: Vector3, raw_gravity: Vector3, peak_gyro: Vector3 = Vector3.ZERO) -> void:
+func update(delta: float, raw_gyro: Vector3, raw_accel: Vector3, raw_gravity: Vector3, peak_gyro: Vector3 = Vector3.ZERO, peak_linear: Vector3 = Vector3.ZERO) -> void:
 	just_swung = false
 	if delta <= 0.0 or delta > 0.15:
 		delta = 0.016
@@ -156,8 +157,9 @@ func update(delta: float, raw_gyro: Vector3, raw_accel: Vector3, raw_gravity: Ve
 		linear_accel = Vector3.ZERO
 
 	if _bias_samples_left > 0:
-		_bias_accum += raw_gyro
-		_bias_count += 1
+		if raw_gyro.length() < 0.35 and linear_accel.length() < 1.5:
+			_bias_accum += raw_gyro
+			_bias_count += 1
 		_bias_samples_left -= 1
 		if _bias_samples_left == 0 and _bias_count > 0:
 			gyro_bias = _bias_accum / float(_bias_count)
@@ -218,7 +220,8 @@ func update(delta: float, raw_gyro: Vector3, raw_accel: Vector3, raw_gravity: Ve
 	var eff_gyro := gyro
 	if peak_gyro.length() > angular_speed:
 		eff_gyro = peak_gyro - gyro_bias
-	_compute_tip_and_detect(delta, eff_gyro, orientation * linear_accel if linear_accel.length() >= 0.4 else world_lin_est)
+	var det_lin := peak_linear if peak_linear.length() > linear_accel.length() else linear_accel
+	_compute_tip_and_detect(delta, eff_gyro, orientation * det_lin if det_lin.length() >= 0.4 else world_lin_est)
 
 
 func apply_external_orientation(target_q: Quaternion, delta: float, raw_gyro: Vector3, raw_linear: Vector3) -> void:
@@ -282,11 +285,12 @@ func _compute_tip_and_detect(delta: float, eff_gyro: Vector3, world_lin_est: Vec
 	var sens := clampf(GameConfig.dual_sense_sensitivity, 0.65, 1.55)
 	eff_tip_speed *= sens
 	dynamic_accel_mag *= sens
+	_lin_perp_scaled = lin_perp.length() * sens
 	if is_twist_motion or twist_damp:
 		forward_thrust_accel = 0.0
 	else:
 		forward_thrust_accel = maxf(along_blade, fwd_push * 0.9) * sens
-		if lin_perp.length() * sens > forward_thrust_accel * 1.35:
+		if _lin_perp_scaled > forward_thrust_accel * 1.35:
 			forward_thrust_accel *= 0.45
 
 	var dir2 := proj_vel.normalized() if proj_vel.length() > 0.02 else Vector2.ZERO
@@ -358,7 +362,7 @@ func _detect_swing_v2(delta: float, eff_tip_speed: float, raw_tip_vec: Vector2) 
 	# Forward thrust trigger ("Empuje frontal / Estocada")
 	if forward_thrust_accel < THRUST_ACCEL_THRESHOLD * 0.45:
 		_thrust_rearmed = true
-	if _refract_timer <= 0.0 and _thrust_rearmed and forward_thrust_accel >= THRUST_ACCEL_THRESHOLD and eff_tip_speed < 3.05:
+	if _refract_timer <= 0.0 and _thrust_rearmed and forward_thrust_accel >= maxf(THRUST_ACCEL_THRESHOLD, _lin_perp_scaled * 1.15) and eff_tip_speed < 4.5:
 		_thrust_rearmed = false
 		_refract_timer = SWING_REFRACTORY
 		swing_cooldown_timer = SWING_REFRACTORY

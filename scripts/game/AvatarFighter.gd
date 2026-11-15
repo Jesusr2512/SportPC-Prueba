@@ -20,6 +20,7 @@ enum AttackType { CUT = 0, THRUST = 1, WAVE = 2 }
 @export var fighter_name: String = "Jugador 1"
 @export var team_color: Color = Color(0.05, 0.78, 0.92)
 @export var facing_dir: Vector2 = Vector2.RIGHT
+@export var silent_sfx: bool = false
 
 var state: State = State.NORMAL
 var attack_type: int = AttackType.CUT
@@ -63,6 +64,8 @@ var _idle_t: float = 0.0
 var _slash_start_side: float = 1.0
 var _camera_translucent: bool = false
 var _prev_guarding: bool = false
+var _must_release_guard_for_parry: bool = false
+var _guard_timing_pre_synced: bool = false
 
 var _visual_root: Node3D
 var _upper_body: Node3D
@@ -405,6 +408,8 @@ func set_twin_blades(enabled: bool) -> void:
 	twin_blades_enabled = enabled
 	if _offhand_pivot:
 		_offhand_pivot.visible = enabled
+	if _hand_l:
+		_hand_l.visible = not enabled
 
 
 func configure_stage(p_stage_type: int, radius_override: float = -1.0) -> void:
@@ -433,6 +438,7 @@ func reset_for_round(spawn_pos: Vector3, look_dir_xz: Vector2) -> void:
 	attack_type = AttackType.CUT
 	is_guarding = false
 	_prev_guarding = false
+	_must_release_guard_for_parry = false
 	guard_held_time = 99.0
 	is_charged = false
 	auto_guard_ready = false
@@ -558,7 +564,7 @@ func start_windup(slash_dir: Vector2, duration: float, p_attack_type: int = Atta
 	else:
 		_telegraph_bar.rotation = Vector3(cut_ang + PI * 0.5, 0.0, 0.0)
 	var sfx := get_node_or_null("/root/SoundFX")
-	if sfx != null and sfx.has_method("play_windup"):
+	if not silent_sfx and sfx != null and sfx.has_method("play_windup"):
 		sfx.play_windup()
 
 
@@ -566,6 +572,7 @@ func apply_stun(duration: float = 1.65) -> void:
 	state = State.STUNNED
 	stun_timer = duration
 	is_guarding = false
+	_must_release_guard_for_parry = true
 	auto_guard_ready = false
 	dodge_timer = 0.0
 	iframe_timer = 0.0
@@ -624,6 +631,25 @@ func consume_active_hit() -> void:
 	_hit_resolved_this_swing = true
 
 
+func sync_guard_timing(delta: float, can_act: bool) -> void:
+	# Track precise guard hold duration for Timed Perfect Parry window
+	if state == State.STUNNED or guard_break_timer > 0.0:
+		_must_release_guard_for_parry = true
+	if not is_guarding:
+		_must_release_guard_for_parry = false
+
+	if is_guarding and can_act and state == State.NORMAL and guard_break_timer <= 0.0 and not _must_release_guard_for_parry:
+		if not _prev_guarding:
+			guard_held_time = 0.0
+		else:
+			guard_held_time += delta
+		_prev_guarding = true
+	else:
+		_prev_guarding = false
+		guard_held_time = 99.0
+	_guard_timing_pre_synced = true
+
+
 func step_fighter(delta: float, move_input: Vector2, opponent_pos: Vector3, can_act: bool) -> void:
 	_idle_t += delta
 	if guard_break_timer > 0.0:
@@ -633,16 +659,9 @@ func step_fighter(delta: float, move_input: Vector2, opponent_pos: Vector3, can_
 	if iframe_timer > 0.0:
 		iframe_timer = maxf(0.0, iframe_timer - delta)
 
-	# Track precise guard hold duration for Timed Perfect Parry window
-	if is_guarding and can_act and state == State.NORMAL and guard_break_timer <= 0.0:
-		if not _prev_guarding:
-			guard_held_time = 0.0
-		else:
-			guard_held_time += delta
-		_prev_guarding = true
-	else:
-		_prev_guarding = false
-		guard_held_time = 99.0
+	if not _guard_timing_pre_synced:
+		sync_guard_timing(delta, can_act)
+	_guard_timing_pre_synced = false
 
 	if state == State.FALLING:
 		vertical_vel -= 18.0 * delta
@@ -677,8 +696,6 @@ func step_fighter(delta: float, move_input: Vector2, opponent_pos: Vector3, can_
 	var effective_guard := is_guarding and can_act and guard_break_timer <= 0.0
 	if state == State.NORMAL and not effective_guard:
 		guard_meter = minf(100.0, guard_meter + 15.0 * delta)
-	elif effective_guard:
-		guard_meter = minf(100.0, guard_meter + 4.5 * delta)
 
 	match state:
 		State.DODGING:
@@ -872,6 +889,8 @@ func _rebuild_ribbon_mesh() -> void:
 
 
 func _play_sfx(sound_name: String, pitch: float, volume_db: float) -> void:
+	if silent_sfx:
+		return
 	var sfx := get_node_or_null("/root/SoundFX")
 	if sfx != null:
 		sfx.play(sound_name, pitch, volume_db)

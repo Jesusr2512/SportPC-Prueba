@@ -34,6 +34,7 @@ class PlayerSlot:
 	var _prev_dodge: bool = false
 	var _prev_thrust: bool = false
 	var _joy_flick_latch: bool = false
+	var _skip_next_begin_recenter: bool = false
 
 	func clear_edge_states() -> void:
 		_prev_guard = false
@@ -60,8 +61,9 @@ class PlayerSlot:
 		_prev_recenter = recenter_now
 		_prev_dodge = dodge_now
 		_prev_thrust = thrust_now
-		if just_recenter_pressed:
+		if just_recenter_pressed and not _skip_next_begin_recenter:
 			fusion.recenter()
+		_skip_next_begin_recenter = false
 
 
 var slots: Array[PlayerSlot] = []
@@ -71,6 +73,11 @@ var mouse_combat_enabled: bool = true
 var _mobile_queues: Dictionary = {}
 var _mobile_latest_state: Dictionary = {}
 var _mobile_last_seq: Dictionary = {}
+var _mobile_last_rx_msec: Dictionary = {}
+var _mobile_client_ids: Dictionary = {}
+var _mobile_has_sensors: Dictionary = {}
+var _cid_preferred_slot: Dictionary = {}
+var _manually_unassigned_peers: Dictionary = {}
 var _mouse_accum: Vector2 = Vector2.ZERO
 var _mouse_pitch: float = 0.0
 var _mouse_yaw: float = 0.0
@@ -140,53 +147,114 @@ func _register_gamepad(device: int) -> void:
 		assign_gamepad(target_slot, device)
 
 
-func assign_gamepad(slot_idx: int, device: int) -> void:
-	if slot_idx < 0 or slot_idx >= slots.size():
-		return
-	var s := slots[slot_idx]
-	s.source_type = SourceType.GAMEPAD
-	s.device_id = device
-	s.device_name = Input.get_joy_name(device)
-	s.has_motion_sensors = Input.has_joy_motion_sensors(device)
-	if s.has_motion_sensors:
-		Input.set_joy_motion_sensors_enabled(device, true)
+func _clear_slot_fields(s: PlayerSlot) -> void:
+	s.source_type = SourceType.NONE
+	s.device_id = -1
+	s.device_name = "Sin asignar"
+	s.has_motion_sensors = false
 	s.clear_edge_states()
 	s.fusion.reset_pose()
-	s.fusion.start_bias_calibration(20)
-	slots_changed.emit()
 
 
-func assign_mouse(slot_idx: int) -> void:
-	if slot_idx < 0 or slot_idx >= slots.size():
-		return
-	var s := slots[slot_idx]
+func _set_mouse_fields(s: PlayerSlot) -> void:
 	s.source_type = SourceType.MOUSE
 	s.device_id = -1
 	s.device_name = "Ratón + Teclado (Respaldo)"
 	s.has_motion_sensors = false
 	s.clear_edge_states()
 	s.fusion.reset_pose()
+
+
+func _notify_mobile_slot(peer_id: int, slot_idx: int) -> void:
+	if peer_id >= 0 and mobile_server:
+		mobile_server.send_feedback(peer_id, {"as": slot_idx})
+
+
+func _evict_slot_mobile_if_needed(s: PlayerSlot, except_peer_id: int = -1, mark_manual: bool = true) -> void:
+	if s.source_type == SourceType.MOBILE and s.device_id >= 0 and s.device_id != except_peer_id:
+		var old_id := s.device_id
+		if mark_manual:
+			_manually_unassigned_peers[old_id] = true
+			var cid := str(_mobile_client_ids.get(old_id, ""))
+			if not cid.is_empty():
+				_cid_preferred_slot.erase(cid)
+		_notify_mobile_slot(old_id, -1)
+
+
+func assign_gamepad(slot_idx: int, device: int) -> void:
+	if slot_idx < 0 or slot_idx >= slots.size():
+		return
+	var target := slots[slot_idx]
+	_evict_slot_mobile_if_needed(target)
+	for other in slots:
+		if other.index != slot_idx and other.source_type == SourceType.GAMEPAD and other.device_id == device:
+			_clear_slot_fields(other)
+	target.source_type = SourceType.GAMEPAD
+	target.device_id = device
+	target.device_name = Input.get_joy_name(device)
+	target.has_motion_sensors = Input.has_joy_motion_sensors(device)
+	if target.has_motion_sensors:
+		Input.set_joy_motion_sensors_enabled(device, true)
+	target.clear_edge_states()
+	target.fusion.reset_pose()
+	target.fusion.start_bias_calibration(20)
+	if slots[0].source_type == SourceType.NONE:
+		_set_mouse_fields(slots[0])
+	slots_changed.emit()
+
+
+func assign_mouse(slot_idx: int) -> void:
+	if slot_idx < 0 or slot_idx >= slots.size():
+		return
+	var target := slots[slot_idx]
+	_evict_slot_mobile_if_needed(target)
+	for other in slots:
+		if other.index != slot_idx and other.source_type == SourceType.MOUSE:
+			_clear_slot_fields(other)
+	_set_mouse_fields(target)
 	slots_changed.emit()
 
 
 func assign_mobile(slot_idx: int, peer_id: int) -> void:
 	if slot_idx < 0 or slot_idx >= slots.size():
 		return
+	_manually_unassigned_peers.erase(peer_id)
+	var target := slots[slot_idx]
+	var already_same := (target.source_type == SourceType.MOBILE and target.device_id == peer_id)
+	_evict_slot_mobile_if_needed(target, peer_id)
 	for other in slots:
 		if other.index != slot_idx and other.source_type == SourceType.MOBILE and other.device_id == peer_id:
-			other.source_type = SourceType.NONE
-			other.device_id = -1
-			other.device_name = "Sin asignar"
-			other.has_motion_sensors = false
-			other.clear_edge_states()
-	var s := slots[slot_idx]
-	s.source_type = SourceType.MOBILE
-	s.device_id = peer_id
-	s.device_name = "Móvil Wi-Fi #%d" % peer_id
-	s.has_motion_sensors = true
-	s.clear_edge_states()
-	s.fusion.reset_pose()
+			_clear_slot_fields(other)
+			if other.index == 0:
+				_set_mouse_fields(slots[0])
+	target.source_type = SourceType.MOBILE
+	target.device_id = peer_id
+	target.device_name = "Móvil Wi-Fi #%d" % peer_id
+	target.has_motion_sensors = bool(_mobile_has_sensors.get(peer_id, true))
+	if not already_same:
+		target.clear_edge_states()
+		target.fusion.reset_pose()
+		target.fusion.start_bias_calibration(20)
+	var cid := str(_mobile_client_ids.get(peer_id, ""))
+	if not cid.is_empty():
+		_cid_preferred_slot[cid] = slot_idx
+	_notify_mobile_slot(peer_id, slot_idx)
 	slots_changed.emit()
+
+
+func unassign_slot(slot_idx: int) -> void:
+	if slot_idx < 0 or slot_idx >= slots.size():
+		return
+	var target := slots[slot_idx]
+	_evict_slot_mobile_if_needed(target)
+	_clear_slot_fields(target)
+	slots_changed.emit()
+
+
+func calibrate_bias_slot(slot_idx: int) -> void:
+	if slot_idx < 0 or slot_idx >= slots.size():
+		return
+	slots[slot_idx].fusion.start_bias_calibration(20)
 
 
 func get_available_gamepads() -> Array[Dictionary]:
@@ -201,28 +269,101 @@ func get_available_gamepads() -> Array[Dictionary]:
 
 
 func get_connected_mobile_peers() -> Array[int]:
-	var peers: Array[int] = []
+	var seen: Dictionary = {}
 	for k in _mobile_latest_state.keys():
+		seen[int(k)] = true
+	for k in _mobile_last_rx_msec.keys():
+		seen[int(k)] = true
+	for s in slots:
+		if s.source_type == SourceType.MOBILE and s.device_id >= 0:
+			seen[s.device_id] = true
+	var peers: Array[int] = []
+	for k in seen.keys():
 		peers.append(int(k))
 	peers.sort()
 	return peers
 
 
+func get_mobile_peer_info(peer_id: int) -> Dictionary:
+	return {
+		"peer_id": peer_id,
+		"sensors": bool(_mobile_has_sensors.get(peer_id, true)),
+		"slot": _find_slot_by_mobile_peer(peer_id),
+		"idle": _is_mobile_peer_idle(peer_id, 1800)
+	}
+
+
+func _is_mobile_peer_idle(peer_id: int, max_idle_ms: int = 1800) -> bool:
+	if peer_id < 0 or not _mobile_last_rx_msec.has(peer_id):
+		return true
+	return (Time.get_ticks_msec() - int(_mobile_last_rx_msec[peer_id])) > max_idle_ms
+
+
 func _on_mobile_telemetry(peer_id: int, data: Dictionary) -> void:
+	var act := str(data.get("act", ""))
+	var cid := str(data.get("cid", "")).strip_edges()
+	var is_first_rx := not _mobile_last_rx_msec.has(peer_id)
+	_mobile_last_rx_msec[peer_id] = Time.get_ticks_msec()
+	if not cid.is_empty():
+		_mobile_client_ids[peer_id] = cid
+	if data.has("sens"):
+		var sens_flag := int(data.get("sens", 1)) != 0
+		_mobile_has_sensors[peer_id] = sens_flag
+		var cur_slot := _find_slot_by_mobile_peer(peer_id)
+		if cur_slot != -1 and slots[cur_slot].has_motion_sensors != sens_flag:
+			slots[cur_slot].has_motion_sensors = sens_flag
+			slots_changed.emit()
+
 	var requested_slot := clampi(int(data.get("s", 0)), 0, 1)
 	var owner_slot := _find_slot_by_mobile_peer(peer_id)
 
-	if owner_slot == -1:
-		# Do not steal a slot actively occupied by a different connected mobile peer
-		var target := slots[requested_slot]
-		if target.source_type != SourceType.MOBILE or not _mobile_latest_state.has(target.device_id):
-			assign_mobile(requested_slot, peer_id)
-		elif slots[1 - requested_slot].source_type != SourceType.MOBILE:
-			assign_mobile(1 - requested_slot, peer_id)
-	elif owner_slot != requested_slot:
-		var other := slots[requested_slot]
-		if other.source_type != SourceType.MOBILE or not _mobile_latest_state.has(other.device_id):
-			assign_mobile(requested_slot, peer_id)
+	if act == "claim":
+		_manually_unassigned_peers.erase(peer_id)
+		if owner_slot != requested_slot:
+			var target := slots[requested_slot]
+			var occupied_by_fresh_mobile := (
+				target.source_type == SourceType.MOBILE
+				and target.device_id != peer_id
+				and not _is_mobile_peer_idle(target.device_id, 1800)
+			)
+			if not occupied_by_fresh_mobile:
+				assign_mobile(requested_slot, peer_id)
+			else:
+				_notify_mobile_slot(peer_id, owner_slot)
+	elif act == "hello" or (owner_slot == -1 and is_first_rx and not _manually_unassigned_peers.has(peer_id)):
+		if owner_slot == -1:
+			var desired := requested_slot
+			if not cid.is_empty() and _cid_preferred_slot.has(cid):
+				desired = clampi(int(_cid_preferred_slot[cid]), 0, 1)
+			var target := slots[desired]
+			var alt := slots[1 - desired]
+			var can_take_desired := (
+				target.source_type == SourceType.NONE
+				or target.source_type == SourceType.MOUSE
+				or (target.source_type == SourceType.MOBILE and _is_mobile_peer_idle(target.device_id, 1800))
+			)
+			var can_take_alt := (
+				alt.source_type == SourceType.NONE
+				or alt.source_type == SourceType.MOUSE
+				or (alt.source_type == SourceType.MOBILE and _is_mobile_peer_idle(alt.device_id, 1800))
+			)
+			if can_take_desired:
+				assign_mobile(desired, peer_id)
+			elif can_take_alt:
+				assign_mobile(1 - desired, peer_id)
+			else:
+				_notify_mobile_slot(peer_id, -1)
+		else:
+			_notify_mobile_slot(peer_id, owner_slot)
+
+	owner_slot = _find_slot_by_mobile_peer(peer_id)
+	if owner_slot != -1 and act == "recenter":
+		recenter_slot(owner_slot)
+
+	_mobile_latest_state[peer_id] = data
+	var has_motion_payload := data.has("g") or data.has("a") or data.has("b")
+	if not has_motion_payload:
+		return
 
 	var seq := int(data.get("q", -1))
 	var prev_seq := int(_mobile_last_seq.get(peer_id, -1))
@@ -231,7 +372,6 @@ func _on_mobile_telemetry(peer_id: int, data: Dictionary) -> void:
 	if seq >= 0:
 		_mobile_last_seq[peer_id] = seq
 
-	_mobile_latest_state[peer_id] = data
 	var queue: Array = _mobile_queues.get(peer_id, [])
 	queue.append(data)
 	if queue.size() > 14:
@@ -250,13 +390,13 @@ func _on_mobile_disconnected(peer_id: int) -> void:
 	_mobile_queues.erase(peer_id)
 	_mobile_latest_state.erase(peer_id)
 	_mobile_last_seq.erase(peer_id)
+	_mobile_last_rx_msec.erase(peer_id)
+	_mobile_client_ids.erase(peer_id)
+	_mobile_has_sensors.erase(peer_id)
+	_manually_unassigned_peers.erase(peer_id)
 	for s in slots:
 		if s.source_type == SourceType.MOBILE and s.device_id == peer_id:
-			s.source_type = SourceType.NONE
-			s.device_id = -1
-			s.device_name = "Sin asignar"
-			s.has_motion_sensors = false
-			s.clear_edge_states()
+			_clear_slot_fields(s)
 	if slots[0].source_type == SourceType.NONE:
 		assign_mouse(0)
 	slots_changed.emit()
@@ -304,6 +444,7 @@ func _push_mobile_hud_feedback() -> void:
 	for s in slots:
 		if s.source_type == SourceType.MOBILE and s.device_id >= 0 and mobile_server:
 			mobile_server.send_feedback(s.device_id, {
+				"as": s.index,
 				"roll": snappedf(s.fusion.get_blade_angle_deg(), 0.5),
 				"aim": [snappedf(s.fusion.aim_dir.x, 0.01), snappedf(s.fusion.aim_dir.y, 0.01)],
 				"pose": s.fusion.get_aim_label(),
@@ -400,18 +541,28 @@ func _update_mobile_slot(s: PlayerSlot, delta: float) -> void:
 	var swung_type := s.fusion.last_slash_type
 	var swung_source := s.fusion.last_swing_source
 
-	var guard := false
+	var any_guard := false
+	var last_guard := false
 	var strike := false
 	var recenter := false
+	var inline_recentered := false
+	var prev_pkt_recenter := s._prev_recenter
 	var dodge := false
 	var dodge_dir := 0.0
 	var thrust := false
 
 	for pkt in queue:
 		var btns := int(pkt.get("b", 0))
-		guard = (btns & 1) != 0
+		var pkt_guard := (btns & 1) != 0
+		any_guard = any_guard or pkt_guard
+		last_guard = pkt_guard
 		strike = strike or ((btns & 2) != 0)
-		recenter = recenter or ((btns & 4) != 0)
+		var pkt_recenter := (btns & 4) != 0
+		recenter = recenter or pkt_recenter
+		if pkt_recenter and not prev_pkt_recenter:
+			s.fusion.recenter()
+			inline_recentered = true
+		prev_pkt_recenter = pkt_recenter
 		var pkt_dodge := ((btns & 8) != 0) or ((btns & 32) != 0)
 		if pkt_dodge:
 			dodge = true
@@ -436,16 +587,18 @@ func _update_mobile_slot(s: PlayerSlot, delta: float) -> void:
 		var pg_arr: Array = pkt.get("pg", g_arr)
 		var a_arr: Array = pkt.get("a", [0.0, 0.0, 9.81])
 		var l_arr: Array = pkt.get("l", [0.0, 0.0, 0.0])
+		var la_arr: Array = pkt.get("la", l_arr)
 		var has_lin := int(pkt.get("hl", 1)) != 0
 
 		# Exact right-handed transformation: Phone (+X right, +Y blade top, +Z screen normal) -> Sword Frame
 		var raw_gyro := Vector3(float(g_arr[0]), float(g_arr[1]), float(g_arr[2]))
 		var peak_gyro := Vector3(float(pg_arr[0]), float(pg_arr[1]), float(pg_arr[2]))
 		var raw_accel := Vector3(-float(a_arr[0]), -float(a_arr[2]), float(a_arr[1]))
-		var raw_linear := Vector3(float(l_arr[0]), float(l_arr[2]), -float(l_arr[1]))
-		var gravity_est := (raw_accel + raw_linear) if has_lin else Vector3.ZERO
+		var raw_linear_now := Vector3(float(la_arr[0]), float(la_arr[2]), -float(la_arr[1]))
+		var raw_linear_peak := Vector3(float(l_arr[0]), float(l_arr[2]), -float(l_arr[1]))
+		var gravity_est := (raw_accel + raw_linear_now) if has_lin else Vector3.ZERO
 
-		s.fusion.update(pkt_dt, raw_gyro, raw_accel, gravity_est, peak_gyro)
+		s.fusion.update(pkt_dt, raw_gyro, raw_accel, gravity_est, peak_gyro, raw_linear_peak)
 		if s.fusion.just_swung:
 			if not any_swung or s.fusion.last_slash_power >= swung_power:
 				swung_dir = s.fusion.last_slash_dir
@@ -464,6 +617,8 @@ func _update_mobile_slot(s: PlayerSlot, delta: float) -> void:
 		s.fusion.last_slash_type = swung_type
 		s.fusion.last_swing_source = swung_source
 
+	var guard := last_guard or (any_guard and not s.is_guarding)
+	s._skip_next_begin_recenter = inline_recentered
 	s.move_axis = Vector2(clampf(dodge_dir, -1.0, 1.0), 0.0) if dodge else Vector2.ZERO
 	s.begin_frame(guard, strike, recenter, dodge, thrust)
 	_apply_manual_attack_buttons(s, thrust)
@@ -471,8 +626,15 @@ func _update_mobile_slot(s: PlayerSlot, delta: float) -> void:
 
 func _update_mouse_slot(s: PlayerSlot, delta: float) -> void:
 	var safe_dt := maxf(delta, 0.004)
+	var gui_hovered := get_viewport().gui_get_hovered_control()
+	var clicking_ui := gui_hovered != null and (
+		gui_hovered is BaseButton
+		or gui_hovered is OptionButton
+		or gui_hovered is Slider
+		or gui_hovered is ScrollBar
+	)
 	var guard := Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
-	var strike := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and mouse_combat_enabled
+	var strike := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and mouse_combat_enabled and not clicking_ui
 	var dodge_left := Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT)
 	var dodge_right := Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT)
 	var dodge := Input.is_key_pressed(KEY_SPACE) or Input.is_key_pressed(KEY_SHIFT) or dodge_left or dodge_right
@@ -496,10 +658,7 @@ func _update_mouse_slot(s: PlayerSlot, delta: float) -> void:
 		if not Input.is_key_pressed(KEY_Q) and not Input.is_key_pressed(KEY_E):
 			_mouse_roll = clampf(_mouse_roll - _mouse_accum.x * sensitivity * 0.85, -1.45, 1.45)
 
-	var vel_scale := 0.015 if mouse_combat_enabled else 0.0
-	var vel_x := -_mouse_accum.y / safe_dt * vel_scale
-	var vel_y := -_mouse_accum.x / safe_dt * vel_scale
-	var fake_gyro := Vector3(vel_x, vel_y, 0.0)
+	var fake_gyro := Vector3.ZERO
 
 	var q := Quaternion.from_euler(Vector3(_mouse_pitch, _mouse_yaw, _mouse_roll))
 	s.fusion.apply_external_orientation(q, safe_dt, fake_gyro, Vector3.ZERO)

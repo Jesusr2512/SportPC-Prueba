@@ -480,5 +480,108 @@ func _run_checks() -> void:
 	if _failed: return
 	print("OK Pommel Axial Twist Immunity + Braking Lag vs Real Directional Swings")
 
+	# Test N: SimpleQR, Persistent Mobile Client Pairing, Slot Ownership & Bias Calibration
+	var qr_script = preload("res://scripts/ui/SimpleQR.gd")
+	var qr_tex: ImageTexture = qr_script.make_texture("https://192.168.1.100:8443", 4, 2)
+	_check(qr_tex != null and qr_tex.get_width() == 132, "SimpleQR V3-L texture must build crisp 132x132 image")
+
+	hub.assign_mouse(0)
+	hub.unassign_slot(1)
+	hub._on_mobile_telemetry(201, {"act": "hello", "cid": "tab1", "s": 0, "sens": 0})
+	_check(hub.slots[0].source_type == MotionHub.SourceType.MOBILE and hub.slots[0].device_id == 201, "Mobile hello must claim Slot 0 (Jugador 1), got id=%d" % hub.slots[0].device_id)
+	hub.assign_mobile(1, 201)
+	_check(hub.slots[1].device_id == 201 and hub.slots[0].source_type == MotionHub.SourceType.MOUSE, "Moving peer to P2 must keep P1 usable as Mouse")
+	hub._on_mobile_telemetry(201, {"s": 0, "q": 10, "dt": 0.016, "g": [0, 0, 0], "pg": [0, 0, 0], "a": [0, 0, 9.81], "l": [0, 0, 0], "hl": 1, "b": 0})
+	_check(hub.slots[1].device_id == 201 and hub.slots[0].source_type == MotionHub.SourceType.MOUSE, "Passive telemetry must NOT steal P1 back when PC set peer to P2")
+	hub._on_mobile_telemetry(201, {"act": "claim", "cid": "tab1", "s": 0, "sens": 1})
+	_check(hub.slots[0].device_id == 201, "Explicit mobile claim must allow reclaiming P1")
+	# Simulate reconnect with same cid -> peer 202 takes over preferred slot without bouncing to P2
+	hub._on_mobile_disconnected(201)
+	hub._on_mobile_telemetry(202, {"act": "hello", "cid": "tab1", "s": 0, "sens": 1})
+	_check(hub.slots[0].source_type == MotionHub.SourceType.MOBILE and hub.slots[0].device_id == 202, "Reconnect with same cid must restore Slot 0 (J1)")
+	# Simulate idle peer (>1.8s silent) replaced cleanly by fresh mobile peer 203
+	hub._mobile_last_rx_msec[202] = Time.get_ticks_msec() - 2500
+	hub._on_mobile_telemetry(203, {"act": "hello", "cid": "tab2", "s": 0, "sens": 0})
+	_check(hub.slots[0].device_id == 203, "Fresh mobile must replace idle stale peer in Slot 0")
+	hub.calibrate_bias_slot(0)
+	_check(hub.slots[0].fusion._bias_samples_left == 20, "calibrate_bias_slot(0) must initialize IMU bias samples safely")
+
+	var main_menu_scene := load("res://scenes/MainMenu.tscn") as PackedScene
+	var menu_inst = main_menu_scene.instantiate()
+	tree.root.add_child(menu_inst)
+	await tree.process_frame
+	var p1_sel: OptionButton = menu_inst.device_picker_p1
+	_check(p1_sel.get_item_id(p1_sel.selected) == 1000 + 203, "MainMenu P1 picker must select connected mobile peer #203, got %d" % p1_sel.get_item_id(p1_sel.selected))
+	menu_inst.queue_free()
+	await tree.process_frame
+	hub._on_mobile_disconnected(202)
+	hub._on_mobile_disconnected(203)
+	hub.assign_mouse(0)
+	hub.unassign_slot(1)
+	if _failed: return
+	print("OK SimpleQR, Persistent Mobile Pairing, PC<->Mobile Sync & MainMenu Picker")
+
+	# Test O: AI World-Space Diagonal Guard/Attack Math, Thrust Stun, No Stun-Hold Parry Exploit & Rematch Reset
+	var arena_o = arena_scene.instantiate()
+	tree.root.add_child(arena_o)
+	await tree.process_frame
+	arena_o._complete_entry_calibration()
+	arena_o.phase = arena_o.MatchPhase.FIGHTING
+	arena_o.script_ai_and_input_enabled = false
+	arena_o.f1.reset_for_round(Vector3(0.0, 0.0, 0.78), Vector2(0.0, -1.0))
+	arena_o.f2.reset_for_round(Vector3(0.0, 0.0, -0.78), Vector2(0.0, 1.0))
+	arena_o.f1.is_guarding = true
+	arena_o.f1.blade_roll_rad = PI * 0.25
+	var ai_brk_dir: Vector2 = arena_o._ai_slash_dir_for_world_axis(arena_o.f1.get_world_blade_axis())
+	_check(absf(arena_o.f2.get_world_slash_axis(ai_brk_dir).dot(arena_o.f1.get_world_blade_axis())) > 0.95, "AI parallel guard-break slash must align in world space on diagonals")
+	var diag_slash_w: Vector3 = arena_o.f1.get_world_slash_axis(Vector2(0.707, 0.707))
+	var ai_blk_roll: float = arena_o._ai_roll_for_world_axis(diag_slash_w, PI * 0.5)
+	_check(absf(arena_o.f2.get_world_blade_axis(ai_blk_roll).dot(diag_slash_w)) < 0.05, "AI perpendicular diagonal block roll must be orthogonal in world space")
+
+	# Early windup counter-hit (must hit, NOT force Clash)
+	arena_o.f2.start_windup(Vector2(1.0, 0.0), 0.30)
+	arena_o.f2.windup_timer = 0.25
+	arena_o.f1.trigger_slash(Vector2(0.0, 1.0), 1.0)
+	_step_combat(arena_o, 5, 0.02)
+	_check(arena_o.f2.velocity_xz.y < -2.0, "Hitting early during windup must land counter-hit instead of forcing clash")
+
+	# Thrust depleting guard_meter to 0 must stun defender (held static guard past parry window)
+	arena_o._hitstop_timer = 0.0
+	arena_o.f1.reset_for_round(Vector3(0.0, 0.0, 0.78), Vector2(0.0, -1.0))
+	arena_o.f2.reset_for_round(Vector3(0.0, 0.0, -0.78), Vector2(0.0, 1.0))
+	arena_o.f2.is_guarding = true
+	arena_o.f2.guard_meter = 20.0
+	for _j in 15:
+		arena_o.f2.step_fighter(0.02, Vector2.ZERO, arena_o.f1.position, true)
+	arena_o.f1.trigger_slash(Vector2(0.0, -1.0), 1.0, AvatarFighter.AttackType.THRUST)
+	_step_combat(arena_o, 5, 0.02)
+	_check(arena_o.f2.guard_meter == 0.0 and arena_o.f2.state == AvatarFighter.State.STUNNED, "Thrust breaking remaining guard_meter must stun defender (meter=%f state=%d)" % [arena_o.f2.guard_meter, arena_o.f2.state])
+	if _failed:
+		arena_o.queue_free()
+		return
+
+	# Holding guard continuously through stun must NOT yield free Perfect Parry upon stun expiry
+	arena_o._hitstop_timer = 0.0
+	arena_o.f2.reset_for_round(Vector3(0.0, 0.0, -0.78), Vector2(0.0, 1.0))
+	arena_o.f2.apply_stun(0.03)
+	arena_o.f2.is_guarding = true
+	arena_o.f2.step_fighter(0.02, Vector2.ZERO, arena_o.f1.position, true)
+	arena_o.f2.is_guarding = true
+	arena_o.f2.step_fighter(0.02, Vector2.ZERO, arena_o.f1.position, true)
+	_check(arena_o.f2.state == AvatarFighter.State.NORMAL and arena_o.f2.guard_held_time > 50.0, "Holding guard without releasing after stun must not trigger frame-0 Perfect Parry")
+	# Releasing then re-pressing guard cleanly arms Perfect Parry window
+	arena_o.f2.is_guarding = false
+	arena_o.f2.step_fighter(0.02, Vector2.ZERO, arena_o.f1.position, true)
+	arena_o.f2.is_guarding = true
+	arena_o.f2.step_fighter(0.02, Vector2.ZERO, arena_o.f1.position, true)
+	_check(arena_o.f2.guard_held_time < 0.05, "Re-pressing guard after release must arm fresh Perfect Parry timing")
+	if _failed:
+		arena_o.queue_free()
+		return
+	arena_o.queue_free()
+	await tree.process_frame
+	if _failed: return
+	print("OK AI World-Space Geometry, Early Windup Counter-Hit, Thrust Stun & Parry Exploits")
+
 	print("ALL SMOKE TESTS PASSED SUCCESSFULLY!")
 	tree.quit(0)

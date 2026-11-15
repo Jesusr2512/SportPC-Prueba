@@ -48,14 +48,47 @@
     }
     .title { font-weight: 900; font-size: 15px; letter-spacing: 0.3px; }
     .badge {
-      padding: 3px 9px;
+      padding: 4px 9px;
       border-radius: 999px;
       font-size: 11px;
-      font-weight: 800;
+      font-weight: 900;
       background: #ef4444;
       color: #fff;
+      cursor: pointer;
+      border: 1px solid rgba(255,255,255,0.22);
     }
     .badge.ok { background: #10b981; color: #042f2e; }
+    .badge.p1 { background: linear-gradient(135deg, #22d3ee, #0284c7); color: #031525; border-color: #bae6fd; }
+    .badge.p2 { background: linear-gradient(135deg, #fb7185, #e11d48); color: #fff1f2; border-color: #fecdd3; }
+    .badge.wait { background: #f59e0b; color: #1c1917; border-color: #fde68a; }
+    .assign-card {
+      background: rgba(15, 23, 42, 0.72);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      border-radius: 14px;
+      padding: 10px 12px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #e0f2fe;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .assign-card.p2 {
+      border-color: rgba(251, 113, 133, 0.55);
+      color: #ffe4e6;
+    }
+    .assign-card.wait {
+      border-color: rgba(245, 158, 11, 0.55);
+      color: #fef3c7;
+    }
+    .app.is-p2 .blade-banner {
+      border-color: rgba(251, 113, 133, 0.45);
+    }
+    .app.is-p2 .guard-pad:not(.charged) {
+      border-color: rgba(251, 113, 133, 0.58);
+      background: radial-gradient(circle at 50% 45%, rgba(159, 18, 57, 0.42), rgba(15, 23, 42, 0.90));
+    }
     .top-btn-group {
       display: flex;
       gap: 6px;
@@ -409,11 +442,11 @@
   </style>
 </head>
 <body>
-  <div class="app">
+  <div id="appRoot" class="app">
     <div class="header">
       <div class="title-wrap">
         <div class="title">SportPC</div>
-        <div id="statusBadge" class="badge">Desconectado</div>
+        <button id="statusBadge" class="badge wait" type="button" title="Toca para alternar Jugador 1 / Jugador 2">Conectando...</button>
       </div>
       <div class="top-btn-group">
         <button id="guideBtn" class="top-btn guide" type="button">❔ Guía</button>
@@ -422,12 +455,17 @@
     </div>
 
     <div id="setupPanel" class="setup-panel">
-      <div class="slots">
-        <button id="btnP1" class="slot-btn active-p1" type="button">Jugador 1 (Azul)</button>
-        <button id="btnP2" class="slot-btn" type="button">Jugador 2 (Coral)</button>
+      <div id="assignBanner" class="assign-card wait">
+        <span id="assignText">⏳ Conectando con el PC...</span>
+        <span id="assignSub" style="font-size:11px;opacity:0.85;">Wi-Fi 6-Axis</span>
       </div>
 
-      <button id="connectBtn" class="connect-btn" type="button">Conectar Sensores 6-Axis y Bloquear Giro</button>
+      <div class="slots">
+        <button id="btnP1" class="slot-btn active-p1" type="button">🔵 Jugador 1 (Azul)</button>
+        <button id="btnP2" class="slot-btn" type="button">🔴 Jugador 2 (Coral)</button>
+      </div>
+
+      <button id="connectBtn" class="connect-btn" type="button">⚔️ Activar Sensores 6-Axis y Jugar</button>
 
       <div id="visualGuideContent" class="tip-box">
         <div class="demo-row">
@@ -524,7 +562,11 @@
   </div>
 
   <script>
+    const appRoot = document.getElementById("appRoot");
     const statusBadge = document.getElementById("statusBadge");
+    const assignBanner = document.getElementById("assignBanner");
+    const assignText = document.getElementById("assignText");
+    const assignSub = document.getElementById("assignSub");
     const setupPanel = document.getElementById("setupPanel");
     const playPanel = document.getElementById("playPanel");
     const connectBtn = document.getElementById("connectBtn");
@@ -560,8 +602,22 @@
       (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
     const accelSign = isIOS ? -1.0 : 1.0;
 
+    let clientId = "";
+    try {
+      clientId = sessionStorage.getItem("sportpc_cid") || "";
+      if (!clientId) {
+        clientId = Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+        sessionStorage.setItem("sportpc_cid", clientId);
+      }
+    } catch (_) {
+      clientId = "m" + Math.random().toString(36).slice(2, 10);
+    }
+
     let slot = 0;
+    let desiredSlot = 0;
+    let assignedSlot = null; // null=pending, 0=J1, 1=J2, -1=unassigned
     let ws = null;
+    let reconnectTimer = null;
     let sensorsReady = false;
     let guardPressed = false;
     let guardPointerId = null;
@@ -597,12 +653,88 @@
       lastTs: 0, hz: 0, hzWindowCount: 0, hzWindowStart: 0
     };
 
-    function updateSlotUI() {
-      btnP1.className = slot === 0 ? "slot-btn active-p1" : "slot-btn";
-      btnP2.className = slot === 1 ? "slot-btn active-p2" : "slot-btn";
+    function resetAccum() {
+      accum.dx = 0; accum.dy = 0; accum.dz = 0; accum.dt = 0; accum.samples = 0;
+      accum.pgx = 0; accum.pgy = 0; accum.pgz = 0; accum.peakRot = 0; accum.peakSweepRot = 0;
+      accum.plx = 0; accum.ply = 0; accum.plz = 0; accum.peakLin = 0;
     }
-    btnP1.addEventListener("click", () => { slot = 0; updateSlotUI(); });
-    btnP2.addEventListener("click", () => { slot = 1; updateSlotUI(); });
+
+    function sendControl(act, targetSlot) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+      ws.send(JSON.stringify({
+        act,
+        cid: clientId,
+        s: typeof targetSlot === "number" ? targetSlot : desiredSlot,
+        sens: sensorsReady ? 1 : 0
+      }));
+      return true;
+    }
+
+    function updateSlotUI() {
+      const wsOpen = Boolean(ws && ws.readyState === WebSocket.OPEN);
+      const effective = (assignedSlot === 0 || assignedSlot === 1) ? assignedSlot : -1;
+      appRoot.classList.toggle("is-p2", effective === 1);
+
+      btnP1.className = desiredSlot === 0 ? "slot-btn active-p1" : "slot-btn";
+      btnP2.className = desiredSlot === 1 ? "slot-btn active-p2" : "slot-btn";
+
+      if (!wsOpen) {
+        statusBadge.textContent = "Conectando...";
+        statusBadge.className = "badge";
+        assignBanner.className = "assign-card wait";
+        assignText.textContent = "⏳ Conectando con el PC...";
+        assignSub.textContent = "Wi-Fi";
+      } else if (effective === 0) {
+        statusBadge.textContent = "🔵 JUGADOR 1 ⇄";
+        statusBadge.className = "badge p1";
+        assignBanner.className = "assign-card";
+        assignText.textContent = "🔵 Conectado como JUGADOR 1 (Azul)";
+        assignSub.textContent = sensorsReady ? "6-Axis Activo" : "Listo · Activa sensores";
+      } else if (effective === 1) {
+        statusBadge.textContent = "🔴 JUGADOR 2 ⇄";
+        statusBadge.className = "badge p2";
+        assignBanner.className = "assign-card p2";
+        assignText.textContent = "🔴 Conectado como JUGADOR 2 (Coral)";
+        assignSub.textContent = sensorsReady ? "6-Axis Activo" : "Listo · Activa sensores";
+      } else if (assignedSlot === -1) {
+        statusBadge.textContent = "⚪ EN ESPERA ⇄";
+        statusBadge.className = "badge wait";
+        assignBanner.className = "assign-card wait";
+        assignText.textContent = "⚪ Sin hueco: toca J1 o J2 para tomar turno";
+        assignSub.textContent = "En espera";
+      } else {
+        statusBadge.textContent = "⌛ Emparejando...";
+        statusBadge.className = "badge wait";
+        assignBanner.className = "assign-card wait";
+        assignText.textContent = "⌛ Solicitando plaza en PC...";
+        assignSub.textContent = "Sincronizando";
+      }
+
+      const showPlay = wsOpen && sensorsReady && (effective === 0 || effective === 1);
+      setupPanel.classList.toggle("hidden", showPlay);
+      playPanel.classList.toggle("visible", showPlay);
+      connectBtn.textContent = sensorsReady
+        ? (wsOpen ? "⚔️ Entrar al Duelo" : "Reconectando al PC...")
+        : "⚔️ Activar Sensores 6-Axis y Jugar";
+    }
+
+    function requestSlotChange(targetSlot) {
+      desiredSlot = targetSlot;
+      slot = targetSlot;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        sendControl("claim", targetSlot);
+      } else {
+        openSocket();
+      }
+      updateSlotUI();
+    }
+
+    btnP1.addEventListener("click", () => requestSlotChange(0));
+    btnP2.addEventListener("click", () => requestSlotChange(1));
+    statusBadge.addEventListener("click", () => {
+      const next = (assignedSlot === 0) ? 1 : 0;
+      requestSlotChange(next);
+    });
 
     function setGuardState(active) {
       if (guardPressed === active) return;
@@ -682,6 +814,7 @@
     function triggerRecenter() {
       recenterPulse = true;
       serverRollDeg = 0;
+      sendControl("recenter", slot);
       if (navigator.vibrate) {
         try { navigator.vibrate([16, 28, 16]); } catch (_) {}
       }
@@ -726,12 +859,12 @@
     document.addEventListener("visibilitychange", async () => {
       if (document.visibilityState === "hidden") {
         guardPointerId = null;
-        movePointerId = null;
-        moveVec = { x: 0, y: 0 };
-        stickKnob.style.transform = "translate(0px, 0px)";
+        swipePointerId = null;
         setGuardState(false);
-      } else if (document.visibilityState === "visible" && ws && ws.readyState === WebSocket.OPEN) {
-        await lockPortraitAndFullscreen();
+      } else if (document.visibilityState === "visible") {
+        if (!ws || ws.readyState === WebSocket.CLOSED) {
+          openSocket();
+        }
         if ("wakeLock" in navigator) {
           try { await navigator.wakeLock.request("screen"); } catch (_) {}
         }
@@ -792,12 +925,12 @@
           accum.dt += dt;
           accum.samples++;
 
-          if (rotMag >= accum.peakRot) {
-            accum.peakRot = rotMag;
-            accum.pgx = gx; accum.pgy = gy; accum.pgz = gz;
-          }
           if (sweepMag >= accum.peakSweepRot) {
             accum.peakSweepRot = sweepMag;
+            accum.pgx = gx; accum.pgy = gy; accum.pgz = gz;
+          }
+          if (rotMag >= accum.peakRot) {
+            accum.peakRot = rotMag;
           }
           if (linMag >= accum.peakLin) {
             accum.peakLin = linMag;
@@ -808,33 +941,61 @@
     }
 
     function openSocket() {
-      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-        ws.close();
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      if (ws) {
+        const oldWs = ws;
+        oldWs.onopen = null;
+        oldWs.onclose = null;
+        oldWs.onerror = null;
+        oldWs.onmessage = null;
+        if (oldWs.readyState === WebSocket.OPEN || oldWs.readyState === WebSocket.CONNECTING) {
+          try { oldWs.close(); } catch (_) {}
+        }
       }
       const proto = location.protocol === "https:" ? "wss" : "ws";
-      ws = new WebSocket(`${proto}://${location.host}/ws`);
+      const sock = new WebSocket(`${proto}://${location.host}/ws`);
+      ws = sock;
 
-      ws.onopen = () => {
-        statusBadge.textContent = `J${slot + 1} Activo`;
-        statusBadge.classList.add("ok");
-        setupPanel.classList.add("hidden");
-        playPanel.classList.add("visible");
-        triggerRecenter();
+      sock.onopen = () => {
+        if (ws !== sock) return;
+        resetAccum();
+        sendControl("hello", desiredSlot);
+        updateSlotUI();
+        if (sensorsReady) {
+          triggerRecenter();
+        } else {
+          telemetryEl.textContent = "Conectado al PC. Pulsa Activar Sensores para jugar.";
+        }
       };
-      ws.onclose = () => {
-        statusBadge.textContent = "Desconectado";
-        statusBadge.classList.remove("ok");
-        setupPanel.classList.remove("hidden");
-        playPanel.classList.remove("visible");
+      sock.onclose = () => {
+        if (ws !== sock) return;
         setGuardState(false);
-        connectBtn.textContent = "Reconectar Mando";
+        updateSlotUI();
+        telemetryEl.textContent = "Conexión cerrada. Reintentando...";
+        reconnectTimer = setTimeout(() => {
+          if (document.visibilityState !== "hidden") openSocket();
+        }, 1600);
       };
-      ws.onerror = () => {
-        telemetryEl.textContent = "Error WebSocket: revisa el Wi-Fi o recarga.";
+      sock.onerror = () => {
+        if (ws !== sock) return;
+        telemetryEl.textContent = "Error WebSocket: revisa el Wi-Fi o acepta el certificado HTTPS.";
       };
-      ws.onmessage = (ev) => {
+      sock.onmessage = (ev) => {
+        if (ws !== sock) return;
         try {
           const msg = JSON.parse(ev.data);
+          if (typeof msg.as === "number") {
+            const changed = assignedSlot !== msg.as;
+            assignedSlot = msg.as;
+            if (msg.as === 0 || msg.as === 1) {
+              slot = msg.as;
+              desiredSlot = msg.as;
+            }
+            if (changed) updateSlotUI();
+          }
           if (msg.rumble && navigator.vibrate) {
             navigator.vibrate(Math.min(220, Math.max(20, msg.rumble | 0)));
           }
@@ -864,12 +1025,23 @@
 
     connectBtn.addEventListener("click", async () => {
       try {
-        await lockPortraitAndFullscreen();
+        // iOS Safari exige solicitar DeviceMotion sincrónicamente dentro del click antes de otros await
         await requestSensors();
+        resetAccum();
+        await lockPortraitAndFullscreen();
         if ("wakeLock" in navigator) {
           try { await navigator.wakeLock.request("screen"); } catch (_) {}
         }
-        openSocket();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          sendControl("hello", desiredSlot);
+          if (assignedSlot !== 0 && assignedSlot !== 1) {
+            sendControl("claim", desiredSlot);
+          }
+          triggerRecenter();
+          updateSlotUI();
+        } else {
+          openSocket();
+        }
       } catch (err) {
         telemetryEl.textContent = "No se pudieron activar sensores: " + err.message;
       }
@@ -899,7 +1071,11 @@
       aimPad.classList.toggle("hit-flash", isFlashing);
       briskLabelVal.textContent = isFlashing ? "¡GOLPE!" : `${briskPct}%`;
 
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        resetAccum();
+        return;
+      }
+      if (!sensorsReady) return;
 
       const hasSamples = accum.samples > 0 && accum.dt > 0.0005;
       const sendDt = hasSamples ? accum.dt : 0.016;
@@ -909,6 +1085,8 @@
 
       const dodgeMask = dodgePulse ? (dodgeDir > 0 ? 32 : 8) : 0;
       const payload = {
+        cid: clientId,
+        sens: 1,
         s: slot,
         q: ++seqCounter,
         dt: Number(sendDt.toFixed(4)),
@@ -919,6 +1097,7 @@
           Number((hasSamples ? accum.pgz : latest.gz).toFixed(3))
         ],
         a: [Number(latest.ax.toFixed(3)), Number(latest.ay.toFixed(3)), Number(latest.az.toFixed(3))],
+        la: [Number(latest.lx.toFixed(3)), Number(latest.ly.toFixed(3)), Number(latest.lz.toFixed(3))],
         l: [
           Number((hasSamples && accum.peakLin > 0.5 ? accum.plx : latest.lx).toFixed(3)),
           Number((hasSamples && accum.peakLin > 0.5 ? accum.ply : latest.ly).toFixed(3)),
@@ -934,15 +1113,23 @@
       dodgeDir = 0;
       thrustPulse = false;
 
-      accum.dx = 0; accum.dy = 0; accum.dz = 0; accum.dt = 0; accum.samples = 0;
-      accum.pgx = 0; accum.pgy = 0; accum.pgz = 0; accum.peakRot = 0; accum.peakSweepRot = 0;
-      accum.plx = 0; accum.ply = 0; accum.plz = 0; accum.peakLin = 0;
+      resetAccum();
 
       ws.send(JSON.stringify(payload));
       const hzTxt = accum.hz > 0 ? `Sensor ${accum.hz}Hz` : "⚠️ Sin eventos IMU";
+      const roleTxt = assignedSlot === -1 ? "En espera" : `J${slot + 1}`;
       telemetryEl.textContent =
-        `J${slot + 1} | ${hzTxt} | ${serverPose} | Hoja ${deg.toFixed(0)}° | ${guardPressed ? "GUARDIA" : "Listo"}`;
+        `${roleTxt} | ${hzTxt} | ${serverPose} | Hoja ${deg.toFixed(0)}° | ${guardPressed ? "GUARDIA" : "Listo"}`;
     }, 16);
+
+    setInterval(() => {
+      if (!sensorsReady && ws && ws.readyState === WebSocket.OPEN) {
+        sendControl("ping", desiredSlot);
+      }
+    }, 1500);
+
+    updateSlotUI();
+    openSocket();
   </script>
 </body>
 </html>
