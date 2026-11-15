@@ -446,6 +446,17 @@ func _run_checks() -> void:
 	hub._on_mobile_telemetry(999, {"s": 0, "q": 4, "dt": 0.016, "g": [0.0, 0.0, 0.0], "pg": [0.0, 0.0, 0.0], "a": [0.0, 0.0, 9.81], "l": [0.0, 0.0, 0.0], "hl": 1, "d": 0, "m": [0.0, 0.0], "b": 0})
 	hub._process(0.016)
 	_check(hub.slots[0].move_axis == Vector2.ZERO, "Mobile move_axis must reset to ZERO immediately after dodge")
+
+	# Verify mobile rotation (gz = -r.alpha) spins blade roll without attacking, while gy = r.gamma slashes horizontally
+	hub.slots[0].fusion.recenter()
+	for q_i in range(5, 10):
+		hub._on_mobile_telemetry(999, {"s": 0, "q": q_i, "dt": 0.016, "g": [0.0, 0.0, 6.2], "pg": [0.0, 0.0, 6.2], "a": [0.0, 9.81, 0.0], "l": [0.0, 0.0, 0.0], "hl": 1, "d": 0, "m": [0.0, 0.0], "b": 0})
+		hub._process(0.016)
+		_check(not hub.slots[0].fusion.just_swung, "Mobile rotation (gz) must NEVER trigger left-right attack")
+	hub.slots[0].fusion.recenter()
+	hub._on_mobile_telemetry(999, {"s": 0, "q": 10, "dt": 0.016, "g": [0.0, -5.8, 0.0], "pg": [0.0, -5.8, 0.0], "a": [0.0, 9.81, 0.0], "l": [0.0, 0.0, 0.0], "hl": 1, "d": 0, "m": [0.0, 0.0], "b": 0})
+	hub._process(0.016)
+	_check(hub.slots[0].fusion.just_swung and hub.slots[0].fusion.last_slash_dir.x > 0.7, "Mobile horizontal swing (gy = r.gamma) must trigger left-to-right slash")
 	hub._on_mobile_disconnected(999)
 	if _failed: return
 	print("OK End-to-End Android Mobile Telemetry (Thrust / Lateral Dodge / Idle Zero Walk)")

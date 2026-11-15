@@ -899,8 +899,8 @@
           const d2r = Math.PI / 180.0;
 
           const gx = (r.beta || 0) * d2r;
-          const gy = (r.alpha || 0) * d2r;
-          const gz = (r.gamma || 0) * d2r;
+          const gy = (r.gamma || 0) * d2r;
+          const gz = -(r.alpha || 0) * d2r;
           const rotMag = Math.hypot(gx, gy, gz);
           const sweepMag = Math.hypot(gx, gy);
 
