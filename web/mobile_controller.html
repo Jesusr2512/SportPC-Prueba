@@ -592,7 +592,7 @@
     // High-frequency accumulator between WS frames so fast flicks never vanish
     let accum = {
       dx: 0, dy: 0, dz: 0, dt: 0, samples: 0,
-      pgx: 0, pgy: 0, pgz: 0, peakRot: 0,
+      pgx: 0, pgy: 0, pgz: 0, peakRot: 0, peakSweepRot: 0,
       plx: 0, ply: 0, plz: 0, peakLin: 0,
       lastTs: 0, hz: 0, hzWindowCount: 0, hzWindowStart: 0
     };
@@ -769,6 +769,7 @@
           const gy = (r.alpha || 0) * d2r;
           const gz = (r.gamma || 0) * d2r;
           const rotMag = Math.hypot(gx, gy, gz);
+          const sweepMag = Math.hypot(gx, gy);
 
           const ax = (ag.x || 0) * accelSign;
           const ay = (ag.y || 0) * accelSign;
@@ -794,6 +795,9 @@
           if (rotMag >= accum.peakRot) {
             accum.peakRot = rotMag;
             accum.pgx = gx; accum.pgy = gy; accum.pgz = gz;
+          }
+          if (sweepMag >= accum.peakSweepRot) {
+            accum.peakSweepRot = sweepMag;
           }
           if (linMag >= accum.peakLin) {
             accum.peakLin = linMag;
@@ -888,7 +892,7 @@
       aimDot.style.transform = `translate(${(ax * 42).toFixed(1)}px, ${(-ay * 42).toFixed(1)}px)`;
       aimPosePill.textContent = `MIRA: ${serverPose}`;
 
-      const localImpulse = Math.max(accum.peakRot * 1.15, accum.peakLin * 0.28, serverSpeed);
+      const localImpulse = Math.max(accum.peakSweepRot * 1.15, accum.peakLin * 0.20, serverSpeed);
       const briskPct = Math.min(100, Math.round((localImpulse / 4.2) * 100));
       briskFill.style.width = `${briskPct}%`;
       const isFlashing = performance.now() < hitFlashUntil;
@@ -931,7 +935,7 @@
       thrustPulse = false;
 
       accum.dx = 0; accum.dy = 0; accum.dz = 0; accum.dt = 0; accum.samples = 0;
-      accum.pgx = 0; accum.pgy = 0; accum.pgz = 0; accum.peakRot = 0;
+      accum.pgx = 0; accum.pgy = 0; accum.pgz = 0; accum.peakRot = 0; accum.peakSweepRot = 0;
       accum.plx = 0; accum.ply = 0; accum.plz = 0; accum.peakLin = 0;
 
       ws.send(JSON.stringify(payload));

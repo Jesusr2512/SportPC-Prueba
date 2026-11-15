@@ -450,5 +450,35 @@ func _run_checks() -> void:
 	if _failed: return
 	print("OK End-to-End Android Mobile Telemetry (Thrust / Lateral Dodge / Idle Zero Walk)")
 
+	# Test M: Pommel/Hilt ("pomo") Axial Flip Twist Immunity + Braking Lag vs Real Directional Swings
+	var f_pomo := MotionFusion.new()
+	f_pomo.reset_pose()
+	var flip_false_hit := false
+	for i in 12:
+		var g_dir := f_pomo.orientation.inverse() * Vector3(0.0, -9.81, 0.0)
+		var g_lag := g_dir + Vector3(-10.5, 0.0, 9.0)
+		f_pomo.update(0.016, Vector3(2.4, 2.2, 9.5), g_lag, g_dir, Vector3(2.4, 2.2, 9.5))
+		if f_pomo.just_swung:
+			flip_false_hit = true
+	for i in 6:
+		var g_dir := f_pomo.orientation.inverse() * Vector3(0.0, -9.81, 0.0)
+		var g_lag := g_dir + Vector3(-7.5, 0.0, 7.0)
+		f_pomo.update(0.016, Vector3(2.6, 0.4, 0.2), g_lag, g_dir, Vector3(2.6, 0.4, 0.2))
+		if f_pomo.just_swung:
+			flip_false_hit = true
+	_check(not flip_false_hit, "Axial phone flip + wrist wobble + gravity-lag must NEVER trigger strike")
+
+	for i in 12:
+		var g_dir := f_pomo.orientation.inverse() * Vector3(0.0, -9.81, 0.0)
+		f_pomo.update(0.016, Vector3.ZERO, g_dir, g_dir)
+	f_pomo.recenter()
+	f_pomo.update(0.016, Vector3(-4.8, 0.0, 0.0), Vector3(0.0, -9.81, 0.0), Vector3(0.0, -9.81, 0.0))
+	_check(f_pomo.just_swung and f_pomo.last_slash_dir.y > 0.8, "Pitch chop up->down must trigger vertical slash")
+	f_pomo.recenter()
+	f_pomo.update(0.016, Vector3(0.0, -4.8, 0.0), Vector3(0.0, -9.81, 0.0), Vector3(0.0, -9.81, 0.0))
+	_check(f_pomo.just_swung and f_pomo.last_slash_dir.x > 0.8, "Yaw sweep left->right must trigger horizontal slash")
+	if _failed: return
+	print("OK Pommel Axial Twist Immunity + Braking Lag vs Real Directional Swings")
+
 	print("ALL SMOKE TESTS PASSED SUCCESSFULLY!")
 	tree.quit(0)

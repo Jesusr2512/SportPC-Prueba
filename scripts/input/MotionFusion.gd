@@ -61,6 +61,7 @@ var _reversal_travel: float = 0.0
 var _backswing_dir: Vector2 = Vector2.ZERO
 var _backswing_timer: float = 0.0
 var _thrust_rearmed: bool = true
+var _twist_guard_timer: float = 0.0
 
 
 func reset_pose() -> void:
@@ -88,6 +89,7 @@ func reset_pose() -> void:
 	_reversal_travel = 0.0
 	_backswing_timer = 0.0
 	_thrust_rearmed = true
+	_twist_guard_timer = 0.0
 
 
 func recenter() -> void:
@@ -117,6 +119,7 @@ func recenter() -> void:
 	_reversal_travel = 0.0
 	_backswing_timer = 0.0
 	_thrust_rearmed = true
+	_twist_guard_timer = 0.0
 
 
 func recenter_yaw() -> void:
@@ -140,6 +143,7 @@ func update(delta: float, raw_gyro: Vector3, raw_accel: Vector3, raw_gravity: Ve
 	swing_cooldown_timer = maxf(0.0, swing_cooldown_timer - delta)
 	_refract_timer = maxf(0.0, _refract_timer - delta)
 	_backswing_timer = maxf(0.0, _backswing_timer - delta)
+	_twist_guard_timer = maxf(0.0, _twist_guard_timer - delta)
 
 	accel = raw_accel
 	var has_valid_grav := raw_gravity.length() > 1.5
@@ -224,6 +228,7 @@ func apply_external_orientation(target_q: Quaternion, delta: float, raw_gyro: Ve
 	swing_cooldown_timer = maxf(0.0, swing_cooldown_timer - delta)
 	_refract_timer = maxf(0.0, _refract_timer - delta)
 	_backswing_timer = maxf(0.0, _backswing_timer - delta)
+	_twist_guard_timer = maxf(0.0, _twist_guard_timer - delta)
 	raw_orientation = target_q.normalized()
 	orientation = (recenter_offset * raw_orientation).normalized()
 	_sync_derived_angles_from_orientation()
@@ -251,9 +256,22 @@ func _compute_tip_and_detect(delta: float, eff_gyro: Vector3, world_lin_est: Vec
 	var lin_perp := world_lin_est - tip_world * world_lin_est.dot(tip_world)
 
 	var roll_rate := absf(eff_gyro.z)
-	var is_pure_roll := (roll_rate > 1.8) and (tip_speed_3d < roll_rate * 0.42) and (lin_perp.length() < 7.5)
-	var eff_tip_speed := tip_speed_3d * (0.55 if is_pure_roll else 1.0)
-	if not is_pure_roll:
+	# Treat the phone as the sword pommel/hilt: rotating/flipping it along its own shaft ("darle la vuelta")
+	# spins blade edge angle (roll_rate) and causes gravity-filter lag & minor wobble, NEVER an attack slash!
+	var is_twist_motion := (roll_rate > 1.45) and (tip_speed_3d < maxf(4.6, roll_rate * 0.95))
+	if is_twist_motion:
+		_twist_guard_timer = 0.16
+		_backswing_timer = 0.0
+
+	var twist_damp := _twist_guard_timer > 0.0
+	var eff_tip_speed := tip_speed_3d
+	if is_twist_motion:
+		eff_tip_speed = tip_speed_3d * 0.28
+	elif twist_damp and tip_speed_3d < 5.6:
+		# Prevent Android gravity-filter lag & wrist-brake wobble right after flipping the phone
+		eff_tip_speed = tip_speed_3d * 0.36
+		_backswing_timer = 0.0
+	else:
 		var lin_cut_boost := maxf(0.0, lin_perp.length() - 5.2) * 0.34
 		if lin_cut_boost > 0.05:
 			eff_tip_speed += lin_cut_boost
@@ -264,15 +282,18 @@ func _compute_tip_and_detect(delta: float, eff_gyro: Vector3, world_lin_est: Vec
 	var sens := clampf(GameConfig.dual_sense_sensitivity, 0.65, 1.55)
 	eff_tip_speed *= sens
 	dynamic_accel_mag *= sens
-	forward_thrust_accel = maxf(along_blade, fwd_push * 0.9) * sens
-	if lin_perp.length() * sens > forward_thrust_accel * 1.35:
-		forward_thrust_accel *= 0.45
+	if is_twist_motion or twist_damp:
+		forward_thrust_accel = 0.0
+	else:
+		forward_thrust_accel = maxf(along_blade, fwd_push * 0.9) * sens
+		if lin_perp.length() * sens > forward_thrust_accel * 1.35:
+			forward_thrust_accel *= 0.45
 
 	var dir2 := proj_vel.normalized() if proj_vel.length() > 0.02 else Vector2.ZERO
-	tip_vel = dir2 * tip_speed_3d
-	tip_speed = tip_speed_3d
+	tip_vel = dir2 * eff_tip_speed
+	tip_speed = eff_tip_speed
 
-	is_steady = eff_tip_speed < STEADY_THRESHOLD and dynamic_accel_mag < 3.5
+	is_steady = eff_tip_speed < STEADY_THRESHOLD and (dynamic_accel_mag < 3.5 or is_twist_motion or twist_damp)
 	_detect_swing_v2(delta, eff_tip_speed, proj_vel)
 
 
